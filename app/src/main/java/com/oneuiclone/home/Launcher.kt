@@ -350,7 +350,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             topMargin = dp.indicatorRect.top + (dp.indicatorRect.height() - homeSearch.pillHeight) / 2
         })
         // not part of the centred Search + dots row: it hangs off the Search pill's left, so nothing moves for it
-        updatePill = HomeSearchButton(activity, dp, "Update", com.oneuiclone.home.ui.UpdateGlyphs::download)
+        updatePill = HomeSearchButton(activity, dp, "Update", icon = null)
         updatePill.setOnClickListener {
             if (state.state == StateController.State.HOME && !state.isTransitioning && !edit.isActive && !folders.isOpen)
                 AppUpdate.install(activity)
@@ -1775,8 +1775,6 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             AppUpdate.Phase.Installing -> "Installing"
             AppUpdate.Phase.Failed -> "Retry"
         }
-        p.icon = if (AppUpdate.phase == AppUpdate.Phase.Failed) com.oneuiclone.home.ui.UpdateGlyphs::retry
-            else com.oneuiclone.home.ui.UpdateGlyphs::download
         p.progress = if (AppUpdate.phase == AppUpdate.Phase.Downloading) AppUpdate.progress else -1f
         // wide enough for "100%" while downloading, so the pill doesn't twitch with each percent
         val width = if (AppUpdate.phase == AppUpdate.Phase.Downloading) maxOf(p.pillWidth, p.pillWidth("100%")) else p.pillWidth

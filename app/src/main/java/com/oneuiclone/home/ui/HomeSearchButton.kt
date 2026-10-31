@@ -13,15 +13,15 @@ import com.oneuiclone.home.motion.Easing
 
 /**
  * One UI 9 "Finder" entry on the Home screen: a small glass pill left of the page dots. Tapping it grows
- * into the apps-screen search bar, so its geometry is exposed as an [AppsSearch.Origin]. With another [icon]
- * it is also the Update pill left of it ([com.oneuiclone.home.AppUpdate]).
+ * into the apps-screen search bar, so its geometry is exposed as an [AppsSearch.Origin]. With no [icon] it is
+ * also the text-only Update pill left of it ([com.oneuiclone.home.AppUpdate]).
  */
 @SuppressLint("ViewConstructor")
 class HomeSearchButton(
     context: Context,
     private val dp: DeviceProfile,
     label: String,
-    icon: (Canvas, Float, Float, Float, Paint) -> Unit = MagnifierView::draw,
+    private val icon: ((Canvas, Float, Float, Float, Paint) -> Unit)? = MagnifierView::draw,
 ) : View(context) {
 
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -88,9 +88,8 @@ class HomeSearchButton(
     val pillHeight = dp.dpi(32f)
     private val glyphLeft = dp.dp(12f)
     private val glyphBox = dp.dp(16f)
-    private val textStart = glyphLeft + glyphBox + dp.dp(6f)
-    var icon = icon
-        set(v) { if (field !== v) { field = v; invalidate() } }
+    /** After the glyph, or as far in as the end padding when there is none, so the label sits centred. */
+    private val textStart = if (icon != null) glyphLeft + glyphBox + dp.dp(6f) else dp.dp(14f)
     var label = label
         set(v) { if (field != v) { field = v; contentDescription = v; invalidate() } }
     /** The width [label] needs; the owner resizes the view to it. */
@@ -148,7 +147,7 @@ class HomeSearchButton(
             canvas.restore()
         }
         canvas.drawRoundRect(rect, r, r, border)
-        icon(canvas, glyphLeft, (height - glyphBox) / 2f, glyphBox, glyph)
+        icon?.invoke(canvas, glyphLeft, (height - glyphBox) / 2f, glyphBox, glyph)
         val fm = text.fontMetrics
         canvas.drawText(label, textStart, height / 2f - (fm.ascent + fm.descent) / 2f, text)
     }
@@ -181,29 +180,5 @@ class MagnifierView(context: Context, color: Int) : View(context) {
             canvas.drawCircle(cx, cy, cr, p)
             canvas.drawLine(cx + cr * 0.72f, cy + cr * 0.72f, left + s * 0.86f, top + s * 0.86f, p)
         }
-    }
-}
-
-/** The Update pill's glyphs, drawn like [MagnifierView.draw] so they match the Search pill's stroke. */
-object UpdateGlyphs {
-    /** An arrow down onto a tray. */
-    fun download(canvas: Canvas, left: Float, top: Float, s: Float, p: Paint) {
-        p.strokeWidth = s * 0.085f
-        val cx = left + s / 2f
-        canvas.drawLine(cx, top + s * 0.12f, cx, top + s * 0.64f, p)
-        canvas.drawLine(cx - s * 0.22f, top + s * 0.44f, cx, top + s * 0.66f, p)
-        canvas.drawLine(cx + s * 0.22f, top + s * 0.44f, cx, top + s * 0.66f, p)
-        canvas.drawLine(left + s * 0.16f, top + s * 0.86f, left + s * 0.84f, top + s * 0.86f, p)
-    }
-
-    /** A circular arrow, after a failed download or install. */
-    fun retry(canvas: Canvas, left: Float, top: Float, s: Float, p: Paint) {
-        p.strokeWidth = s * 0.085f
-        val r = s * 0.32f; val cx = left + s / 2f; val cy = top + s / 2f
-        canvas.drawArc(cx - r, cy - r, cx + r, cy + r, -60f, 300f, false, p)
-        // head at the arc's start (-60°), pointing along the clockwise turn
-        val hx = cx + r * 0.5f; val hy = cy - r * 0.866f
-        canvas.drawLine(hx, hy, hx - s * 0.20f, hy - s * 0.06f, p)
-        canvas.drawLine(hx, hy, hx + s * 0.02f, hy - s * 0.20f, p)
     }
 }
