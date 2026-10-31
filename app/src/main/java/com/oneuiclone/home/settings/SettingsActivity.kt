@@ -137,6 +137,7 @@ class SettingsActivity : OneUiPage() {
                     .show()
             }
         }
+        developerCard()
         setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(list); isVerticalScrollBarEnabled = false })
     }
 

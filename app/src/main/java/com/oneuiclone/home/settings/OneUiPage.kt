@@ -98,6 +98,61 @@ abstract class OneUiPage : Activity() {
         list.addView(c, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16f) })
     }
 
+    /**
+     * The developer card from Ledgii, last on the page: who made it, the profile buttons, and Email the developer
+     * (subject: the launcher's name).
+     */
+    protected fun developerCard() = card {
+        val c = current ?: return@card
+        c.setPadding(dp(16f), dp(20f), dp(16f), dp(16f))
+        c.addView(TextView(this).apply {
+            text = "Developed by ${Developer.HANDLE}"
+            setTextColor(this@OneUiPage.text); setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Fonts.ui(this@OneUiPage, 700)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        c.addView(TextView(this).apply {
+            text = "Come say hi"
+            setTextColor(sub); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Fonts.ui(this@OneUiPage, 400)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(2f), 0, 0)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val chip = if (night) 0xFF2A2A2C.toInt() else 0xFFEDEDF0.toInt()
+        val socials = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        for ((label, url, mark) in Developer.profiles) {
+            socials.addView(android.widget.ImageView(this).apply {
+                setImageDrawable(MarkDrawable(mark, this@OneUiPage.text, dp(19f)))
+                scaleType = android.widget.ImageView.ScaleType.CENTER
+                contentDescription = label
+                background = android.graphics.drawable.RippleDrawable(
+                    ColorStateList.valueOf(if (night) 0x33FFFFFF else 0x1A000000),
+                    GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(chip) }, null)
+                setOnClickListener { Developer.open(this@OneUiPage, url) }
+            }, LinearLayout.LayoutParams(dp(44f), dp(44f)).apply { marginStart = dp(6f); marginEnd = dp(6f) })
+        }
+        c.addView(socials, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12f) })
+        // a tonal pill: envelope + label centred together
+        val ink = if (night) 0xFFD6E6FF.toInt() else 0xFF0B4FB3.toInt()
+        val email = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            contentDescription = "Email the developer"
+            background = android.graphics.drawable.RippleDrawable(
+                ColorStateList.valueOf(if (night) 0x33FFFFFF else 0x1A000000),
+                GradientDrawable().apply { cornerRadius = 100f * d; setColor(if (night) 0xFF1E3350.toInt() else 0xFFDCEBFF.toInt()) }, null)
+            setOnClickListener { Developer.email(this@OneUiPage) }
+        }
+        email.addView(android.widget.ImageView(this).apply { setImageDrawable(MarkDrawable(Developer.Marks.EMAIL, ink, dp(18f))) },
+            LinearLayout.LayoutParams(dp(18f), dp(18f)).apply { marginEnd = dp(8f) })
+        email.addView(TextView(this).apply {
+            text = "Email the developer"
+            setTextColor(ink); setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Fonts.ui(this@OneUiPage, 600)
+        })
+        c.addView(email, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48f)).apply { topMargin = dp(14f) })
+    }
+
     protected fun header(t: String) {
         current?.addView(TextView(this).apply {
             text = t; setTextColor(primary); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
