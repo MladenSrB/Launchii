@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 2×1 Bubble & Split widget (widgets/QuickOpenWidget.kt): Bubble on the left half, Split on the right -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/quick_pair_widget"
+    android:previewImage="@drawable/quick_pair_widget_preview"
+    android:description="@string/quick_pair_widget_description" />

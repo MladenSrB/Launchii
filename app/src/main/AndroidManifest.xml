@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Google search suggestions in the apps-screen search -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER_HINTS" />
+    <!-- "Choose a photo" sets a display-cropped wallpaper the launcher keeps an exact copy of -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <!-- apps-screen search: contacts (asked for from the search results) -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- search: most-used apps from the system's app usage (granted in Settings › Usage access) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- app bubbles: a bubble is a (hidden) conversation notification, see AppBubbles -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Self-update from the GitHub releases (AppUpdate); the second lets Android 12+ do it
+         without a prompt once Launchii installed itself. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".LauncherActivity"
+            android:clearTaskOnLaunch="true"
+            android:configChanges="keyboard|keyboardHidden|mcc|mnc|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:resumeWhilePausing="true"
+            android:screenOrientation="nosensor"
+            android:stateNotNeeded="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OneUiHome"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER_APP" />
+            </intent-filter>
+        </activity>
+        <!-- Its own task (as Launcher3's settings), so the home gesture closes it like an app instead of
+             running over the Home task -->
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="true"
+            android:taskAffinity="app.launchii.settings"
+            android:label="@string/settings_label"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- First-run setup: permissions and setting the wallpaper again (Settings' task, like the pages above) -->
+        <activity
+            android:name=".settings.SetupActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:taskAffinity="app.launchii.settings"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+
+        <!-- ShortcutService only takes shortcuts from apps with a MAIN/LAUNCHER activity, and app bubbles need one
+             per app (AppBubbles). Our own Apps screen skips our package, so this only shows in other launchers. An alias
+             keeps its target's plain-text label over its own label resource, so the target's label is a resource too
+             (else other launchers list it as "Home screen", and searching "Launchii" there finds nothing). -->
+        <activity-alias
+            android:name=".SettingsLauncher"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:targetActivity=".settings.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Home screen edit mode › Wallpaper and style (and Icons, below); in Settings' task, closed by the home gesture like it -->
+        <activity
+            android:name=".settings.WallpaperStyleActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="false"
+            android:label="Wallpaper and style"
+            android:taskAffinity="app.launchii.settings"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+        <!-- Home screen edit mode › Icons -->
+        <activity
+            android:name=".settings.IconThemeActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="false"
+            android:label="Icons"
+            android:taskAffinity="app.launchii.settings"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+
+        <!-- "Set as wallpaper" from any app: getCropAndSetWallpaperIntent offers CROP_AND_SET_WALLPAPER to the default
+             home app before the system cropper (as Niagara does); ATTACH_DATA lists it under "Use as". Runs in the
+             caller's task, which gets the result. -->
+        <activity
+            android:name=".WallpaperActivity"
+            android:configChanges="keyboard|keyboardHidden|mcc|mnc|navigation|orientation|screenSize|screenLayout|smallestScreenSize|density|fontScale"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/wallpaper_label"
+            android:screenOrientation="nosensor"
+            android:theme="@style/Theme.OneUiHome.Wallpaper">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.CROP_AND_SET_WALLPAPER" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.ATTACH_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".BadgeService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <!-- The Bubbles widget (widgets/BubblesWidget.kt) -->
+        <receiver
+            android:name=".widgets.BubblesWidgetProvider"
+            android:exported="true"
+            android:label="@string/bubbles_widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bubbles_widget_info" />
+        </receiver>
+        <!-- Started for a result by the widget's host, so it runs in the host's task -->
+        <activity
+            android:name=".widgets.BubblesConfigActivity"
+            android:exported="true"
+            android:label="@string/bubbles_widget"
+            android:windowSoftInputMode="stateHidden"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <!-- A tap on the widget in another launcher: no window you can see, just the bubbles -->
+        <activity
+            android:name=".widgets.BubblesOpenActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity="app.launchii.bubbles"
+            android:theme="@style/Theme.OneUiHome.Invisible" />
+        <!-- The Bubble, Multi Bubble and Split widgets (widgets/QuickOpenWidget.kt) -->
+        <receiver
+            android:name=".widgets.BubbleWidgetProvider"
+            android:exported="true"
+            android:label="@string/bubble_widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bubble_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.MultiBubbleWidgetProvider"
+            android:exported="true"
+            android:label="@string/multi_bubble_widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/multi_bubble_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.SplitWidgetProvider"
+            android:exported="true"
+            android:label="@string/split_widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/split_widget_info" />
+        </receiver>
+        <!-- Both in one, 2×1: Bubble on the left, Split on the right -->
+        <receiver
+            android:name=".widgets.QuickPairWidgetProvider"
+            android:exported="true"
+            android:label="@string/quick_pair_widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_pair_widget_info" />
+        </receiver>
+        <!-- A tap on either in another launcher: the panel in a see-through window over it -->
+        <activity
+            android:name=".widgets.QuickOpenActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="app.launchii.quickopen"
+            android:theme="@style/Theme.OneUiHome.QuickOpen"
+            android:windowSoftInputMode="adjustNothing|stateHidden" />
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Bubbles widget for the widget picker: three icons cascading back from the front one, as BubblesWidget.tile
+     draws three apps (front 0.82, each next one 0.92 smaller and 7 % up and right, the stack centred) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="56dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <group android:translateX="25.45" android:translateY="5.15" android:scaleX="0.694" android:scaleY="0.694">
+        <path
+            android:fillColor="#C9B8FA"
+            android:pathData="M99,50C99,6.935,77.063,1,50,1C22.935,1,1,6.935,1,50c0,43.063,21.935,49,49,49C77.063,99,99,93.063,99,50z" />
+    </group>
+    <group android:translateX="15.45" android:translateY="9.15" android:scaleX="0.754" android:scaleY="0.754">
+        <path
+            android:fillColor="#A88BF7"
+            android:pathData="M99,50C99,6.935,77.063,1,50,1C22.935,1,1,6.935,1,50c0,43.063,21.935,49,49,49C77.063,99,99,93.063,99,50z" />
+    </group>
+    <group android:translateX="5.15" android:translateY="12.85" android:scaleX="0.82" android:scaleY="0.82">
+        <path
+            android:fillColor="#FEFEFE"
+            android:pathData="M99,50C99,6.935,77.063,1,50,1C22.935,1,1,6.935,1,50c0,43.063,21.935,49,49,49C77.063,99,99,93.063,99,50z" />
+        <path
+            android:fillColor="#8A5CF5"
+            android:pathData="M43,44m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0" />
+        <path
+            android:fillColor="#8A5CF5"
+            android:pathData="M67,67m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0" />
+    </group>
+</vector>

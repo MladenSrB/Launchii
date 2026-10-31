@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Launchii</string>
+    <!-- SettingsActivity's title in Recents -->
+    <string name="settings_label">Home screen</string>
+    <string name="search_hint">Search</string>
+    <string name="folder_default">Folder</string>
+    <!-- WallpaperActivity, as listed under "Use as" -->
+    <string name="wallpaper_label">Wallpaper</string>
+    <!-- The Bubbles widget (BubblesWidget) -->
+    <string name="bubbles_widget">Bubbles</string>
+    <string name="bubbles_widget_description">Open up to 5 apps in bubbles with one tap</string>
+    <string name="bubble_widget">Bubble</string>
+    <string name="bubble_widget_description">Type an app and press Enter to open it in a bubble</string>
+    <string name="multi_bubble_widget">Multi Bubble</string>
+    <string name="multi_bubble_widget_description">Add apps one after another, then press Done to open them all in bubbles</string>
+    <string name="split_widget">Split</string>
+    <string name="split_widget_description">Type two apps to open them in split screen</string>
+    <string name="quick_pair_widget">Bubble &amp; Split</string>
+    <string name="quick_pair_widget_description">Bubble and Split in one: type an app to open it in a bubble, or two for split screen</string>
+</resources>

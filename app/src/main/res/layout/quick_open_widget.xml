@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Bubble and Split widgets in other launchers: the tile (QuickOpenWidget.tile) alone, centred in the cell, with
+     no name. The tile's size is the host's own icons' (HostLook.applyIcon). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/quick_open_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical">
+
+    <ImageView
+        android:id="@+id/quick_open_tile"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/bubble_widget_preview" />
+</LinearLayout>

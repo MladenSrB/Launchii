@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Bubbles widget: one cell, configured when added and again from its long-press › Configure -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/bubbles_widget"
+    android:previewImage="@drawable/bubbles_widget_preview"
+    android:description="@string/bubbles_widget_description"
+    android:configure="com.oneuiclone.home.widgets.BubblesConfigActivity"
+    android:widgetFeatures="reconfigurable" />

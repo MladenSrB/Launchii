@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 2×1 Bubble & Split widget in other launchers: its pill (QuickOpenWidget.pairTile, sized to the host's icons), each half a tap target -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/quick_pair_tile"
+        android:layout_width="136dp"
+        android:layout_height="62dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:src="@drawable/quick_pair_widget_preview" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:id="@+id/quick_pair_bubble"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:contentDescription="@string/bubble_widget" />
+
+        <FrameLayout
+            android:id="@+id/quick_pair_split"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:contentDescription="@string/split_widget" />
+    </LinearLayout>
+</FrameLayout>

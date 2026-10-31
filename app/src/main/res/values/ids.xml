@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- apps-screen search: rows that IME "go" may open -->
+    <item name="search_enterable" type="id" />
+</resources>

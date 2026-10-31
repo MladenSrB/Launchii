@@ -1,0 +1,9 @@
+# Compile the whole launcher ahead of time. It's small (~0.7 MB) and nearly all of it is on hot paths
+# (touch, transitions, drawing). Sideloaded builds get no cloud profile, so without this they run
+# interpreted/JIT code until background dexopt catches up.
+HSPLcom/oneuiclone/home/**;->**(**)**
+Lcom/oneuiclone/home/**;
+HSPLkotlin/**;->**(**)**
+Lkotlin/**;
+HSPLandroidx/dynamicanimation/**;->**(**)**
+Landroidx/dynamicanimation/**;
