@@ -120,7 +120,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         { if (state.state == StateController.State.APPS) appsLayer else homeLayer },
         { v, app -> launch(v, app) },
         { folder, title -> folder.title = title; model?.save(); bindWorkspace() },
-        { v, item, app -> attachItem(v, item, app, false) { folderSiblings(v) } },
+        { v, item, app ->
+            attachItem(v, item, app, false) { folderSiblings(v) }
+            applyBadge(v, listOf(app.key.component.packageName to app.user))   // folder contents are built on open
+        },
         { folder -> addAppsToFolder(folder) },
         { folder -> pickFolderColor(folder) },
         { prefs.popupFolders },
@@ -491,22 +494,23 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         else flags and (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR).inv()
     }
 
+    private fun applyBadge(v: IconView, pkgs: List<Pair<String, android.os.UserHandle>>) {
+        v.badgeNumber = prefs.badgeNumbers
+        v.badgeCount = if (!prefs.badges) 0 else pkgs.sumOf { BadgeService.count(it.first, it.second) }
+    }
+
     /** Refresh badge counts on every visible icon. */
     fun updateBadges() {
         val r = repo ?: return
         val m = model
-        fun apply(v: IconView, pkgs: List<Pair<String, android.os.UserHandle>>) {
-            v.badgeNumber = prefs.badgeNumbers
-            v.badgeCount = if (!prefs.badges) 0 else pkgs.sumOf { BadgeService.count(it.first, it.second) }
-        }
         fun walk(g: ViewGroup) {
             for (i in 0 until g.childCount) {
                 val c = g.getChildAt(i)
                 if (c is IconView) {
                     when (val it = c.item) {
-                        is HomeItem.App -> r.get(it.key)?.let { a -> apply(c, listOf(a.key.component.packageName to a.user)) }
-                        is HomeItem.Folder -> apply(c, m?.appsInFolder(it.id)?.mapNotNull { f -> r.get(f.key) }?.map { a -> a.key.component.packageName to a.user } ?: emptyList())
-                        else -> c.appInfo?.let { a -> apply(c, listOf(a.key.component.packageName to a.user)) }
+                        is HomeItem.App -> r.get(it.key)?.let { a -> applyBadge(c, listOf(a.key.component.packageName to a.user)) }
+                        is HomeItem.Folder -> applyBadge(c, m?.appsInFolder(it.id)?.mapNotNull { f -> r.get(f.key) }?.map { a -> a.key.component.packageName to a.user } ?: emptyList())
+                        else -> c.appInfo?.let { a -> applyBadge(c, listOf(a.key.component.packageName to a.user)) }
                     }
                 } else if (c is ViewGroup) walk(c)
             }
@@ -520,7 +524,6 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         bindWorkspace()
         bindApps()
         bound = true
-        updateBadges()
         updateWallpaperColors()
         if (firstRun) {
             firstRun = false
@@ -628,6 +631,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         workspace.post { workspace.setCurrentPageImmediately(keep.coerceAtMost(pages - 1)) }
         indicator.setPage(keep.coerceAtMost(pages - 1), false)
         folders.rebound { findView(it) as? com.oneuiclone.home.ui.FolderIconView }
+        updateBadges()                                   // new views: an edit mustn't drop badges until the next resume
     }
 
     private var resizeFrame: com.oneuiclone.home.ui.WidgetResizeFrame? = null
@@ -1299,6 +1303,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 attachItem(this, null, app, true) { appsSiblings() }
             }, i % dp.appsCols, i / dp.appsCols)
         }
+        updateBadges()
     }
 
     // ---------------------------------------------------------------------------------------------

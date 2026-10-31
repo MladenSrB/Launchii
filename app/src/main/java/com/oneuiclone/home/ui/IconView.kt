@@ -161,18 +161,33 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
         typeface = Fonts.ui(context, 600)
     }
 
-    /** One UI badge: circle 32.7 % of the icon centred at (0.8, 0.2); dot 12 %; pill grows with digits. */
+    /**
+     * One UI's home badge (NumberBadgeRenderer / DotBadgeRenderer): centred 0.3965 icon right and up of the icon's centre,
+     * so it overhangs the top-right corner; circle 32.7 %, 10+ a pill whose right edge stays put; dot 12 % across, in the
+     * corner. Pulled in by 0.05 when there's no room above the icon (One UI's isCutoffCondition).
+     */
     private fun drawBadge(canvas: Canvas, left: Int, top: Int) {
         if (badgeCount <= 0) return
         val s = iconSize.toFloat()
-        val cx = left + s * 0.8f
-        val cy = top + s * 0.2f
-        if (!badgeNumber) { canvas.drawCircle(cx, cy, s * 0.12f, badgePaint); return }
+        if (!badgeNumber) {
+            val r = s * 0.06f
+            canvas.drawCircle(left + s - r, top + r, r, badgePaint)
+            return
+        }
+        val pullIn = if (top < s * 0.137f / 2f) 0.05f else 0f
+        val cy = top + s * (0.5f - 0.3965f + pullIn)
         val d = s * 0.327f
         val txt = if (badgeCount > 999) "999+" else badgeCount.toString()
-        badgeText.textSize = if (txt.length >= 3) dp.dp(9f) else dp.dp(12f)
-        val w = maxOf(d, badgeText.measureText(txt) + d * 0.55f)
-        val r = android.graphics.RectF(cx + d / 2f - w, cy - d / 2f, cx + d / 2f, cy + d / 2f)
+        badgeText.textSize = if (s > dp.dp(48f)) dp.dp(12f) else dp.dp(9f)
+        val pad = dp.dp(2f)
+        val (cx, w) = when {
+            badgeCount < 10 -> s * (0.5f + 0.3965f - pullIn) to d
+            badgeCount < 100 -> s * (0.5f + 0.371f - pullIn) - pad to s * 0.378f + 2 * pad
+            badgeCount <= 999 -> s * (0.5f + 0.318f - pullIn) - pad to s * 0.484f + 2 * pad
+            else -> s * (0.5f + 0.24f - pullIn) - pad to s * 0.64f + 2 * pad
+        }
+        val half = maxOf(w, badgeText.measureText(txt) + 2 * pad) / 2f
+        val r = android.graphics.RectF(left + cx - half, cy - d / 2f, left + cx + half, cy + d / 2f)
         canvas.drawRoundRect(r, d / 2f, d / 2f, badgePaint)
         val fm = badgeText.fontMetrics
         canvas.drawText(txt, r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, badgeText)
