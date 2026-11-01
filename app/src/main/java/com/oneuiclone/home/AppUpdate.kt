@@ -22,7 +22,7 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
- * Self-update from the GitHub releases, as Skipii does. At most once a day (and on a new version's first start)
+ * Self-update from the GitHub releases, as Skipii does. At most every 6 hours (and on a new version's first start)
  * the newest release's Launchii.apk is looked up; when it's newer than this build, Home shows an Update pill left
  * of the Search pill ([com.oneuiclone.home.ui.HomeSearchButton] with [Launcher.updatePill]). Tapping it downloads
  * the APK (checked against GitHub's size and sha256) and hands it to PackageInstaller. The first update asks the
@@ -35,8 +35,8 @@ object AppUpdate {
     const val REPO = "deciocrytek/Launchii"
     private const val LATEST_URL = "https://api.github.com/repos/$REPO/releases/latest"
     private const val APK_ASSET = "Launchii.apk"
-    private const val CHECK_EVERY_MS = 24 * 60 * 60 * 1000L
-    /** A check that failed (offline, rate limit) tries again after this, not a day later. */
+    private const val CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
+    /** A check that failed (offline, rate limit) tries again after this, not 6 hours later. */
     private const val RETRY_AFTER_MS = 60 * 60 * 1000L
     private const val KEY_NEXT_CHECK = "next_check"
     private const val KEY_RELEASE = "release"
@@ -81,7 +81,7 @@ object AppUpdate {
         app = context.applicationContext
         prefs = app.getSharedPreferences("update", Context.MODE_PRIVATE)
         thisVersion = app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0"
-        // Shown straight away from the last check; the daily check corrects it.
+        // Shown straight away from the last check; the next check corrects it.
         available = savedRelease()?.takeIf { isNewer(it.version) }
         // An installed update leaves its APK behind; keep only the one still to install.
         val keep = available?.let { apkFile(it).name }
@@ -90,7 +90,7 @@ object AppUpdate {
 
     private fun changed() = onChanged?.invoke()
 
-    /** Called whenever Home comes to the front; looks GitHub up at most once a day, and on a new version's first start. */
+    /** Called whenever Home comes to the front; looks GitHub up at most every 6 hours, and on a new version's first start. */
     fun checkIfDue() {
         val newInstall = prefs.getString(KEY_CHECKED_BY, null) != thisVersion
         if (checking || (!newInstall && System.currentTimeMillis() < prefs.getLong(KEY_NEXT_CHECK, 0L))) return
