@@ -90,6 +90,8 @@ class IconFactory(private val context: Context) {
         const val LOOK_COMIC = "comic"
         /** Icon theme › Groovy: the glyph cut out of cream, ringed by three 70s stripes in the app's colour family. */
         const val LOOK_GROOVY = "groovy"
+        /** The playful looks (the Zoom In card fills in around them: LaunchCard.PLAYFUL_FROM_ALPHA). */
+        val PLAYFUL = setOf(LOOK_DOODLE, LOOK_SPRINKLES, LOOK_COMIC, LOOK_GROOVY)
         private const val DOODLE_PAPER_LIGHT = 0xFFFFFAF0.toInt()
         private const val DOODLE_PAPER_DARK = 0xFF1E1D1B.toInt()
         private const val DOODLE_INK_LIGHT = 0xFF262421.toInt()

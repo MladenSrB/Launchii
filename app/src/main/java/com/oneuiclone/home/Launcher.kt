@@ -1554,6 +1554,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             minimal -> com.oneuiclone.home.ui.LaunchCard.MINIMAL_FROM_ALPHA
             // a Stencil icon's cut-out shows the wallpaper: an opaque card under it would fill the symbol in at the tap
             look && prefs.iconLook == com.oneuiclone.home.icons.IconFactory.LOOK_STENCIL -> com.oneuiclone.home.ui.LaunchCard.STENCIL_FROM_ALPHA
+            look && prefs.iconLook in com.oneuiclone.home.icons.IconFactory.PLAYFUL -> com.oneuiclone.home.ui.LaunchCard.PLAYFUL_FROM_ALPHA
             glass -> com.oneuiclone.home.ui.LaunchCard.GLASS_FROM_ALPHA
             else -> 1f
         }

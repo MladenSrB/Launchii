@@ -165,5 +165,10 @@ class LaunchCard(context: Context) : View(context) {
         const val MINIMAL_FROM_ALPHA = 0f
         /** [fromAlpha] for a Stencil icon: its cut-out keeps showing the wallpaper at first, the card filling in. */
         const val STENCIL_FROM_ALPHA = 0f
+        /**
+         * [fromAlpha] for a Doodle, Sprinkles, Comic or Groovy icon: their plates differ from app to app (and Doodle's
+         * wobbles), so one solid plate colour under the icon at the tap shows as a square behind it; the card fills in.
+         */
+        const val PLAYFUL_FROM_ALPHA = 0f
     }
 }
