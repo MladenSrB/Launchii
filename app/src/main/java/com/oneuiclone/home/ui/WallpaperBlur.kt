@@ -52,6 +52,8 @@ object WallpaperBlur {
     }
 
     private fun run(context: Context, level: Float, onlyIfReplaced: Boolean): Result {
+        // Setting a blurred image would replace Launchii's live wallpaper (test): blur waits until it's off
+        if (LiveWallpaper.isActive(context)) return Result.UNCHANGED
         val wm = WallpaperManager.getInstance(context)
         val prefs = context.getSharedPreferences(WallpaperLayer.PREFS, Context.MODE_PRIVATE)
         val current = wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM)

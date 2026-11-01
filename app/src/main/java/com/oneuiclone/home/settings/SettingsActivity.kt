@@ -36,7 +36,11 @@ class SettingsActivity : OneUiPage() {
     override fun onResume() {
         super.onResume()
         toSetupIfNotHome()   // the drawer can bring this task back without a new onCreate
+        if (rebuildOnResume) { rebuildOnResume = false; build() }
     }
+
+    /** Set when leaving for the live wallpaper preview, whose outcome only shows once we're back. */
+    private var rebuildOnResume = false
 
     /**
      * Opened from another launcher's app list while Launchii isn't Home: setup instead, which asks for Home along with
@@ -114,6 +118,7 @@ class SettingsActivity : OneUiPage() {
             val ok = com.oneuiclone.home.ui.WallpaperLayer.hasOwnCopy(this@SettingsActivity)
             item("Wallpaper effects", if (ok) "Blur and zoom use your wallpaper"
                 else "For blur and zoom, set your wallpaper with Set as wallpaper in your photos app, or from Home screen edit mode › Wallpaper and style › Choose a photo") {}
+            liveWallpaperItem(ok)
             val usage = com.oneuiclone.home.model.AppUsage(this@SettingsActivity).systemAllowed
             item("Most used apps in search", if (usage) "Ranked by how often you open each app"
                 else "Allow usage access so search knows the apps you open most, wherever you open them from, and split-screen apps close cleanly") {
@@ -139,6 +144,44 @@ class SettingsActivity : OneUiPage() {
         }
         developerCard()
         setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(list); isVerticalScrollBarEnabled = false })
+    }
+
+    /**
+     * Launchii's live wallpaper (test): the same picture, drawn by Launchii so Home can zoom the real wallpaper on
+     * app opens and closes. Turning it off puts the picture back as a normal image wallpaper.
+     */
+    private fun liveWallpaperItem(hasCopy: Boolean) {
+        val live = com.oneuiclone.home.ui.LiveWallpaper.isActive(this)
+        item("Live wallpaper (test)", when {
+            live -> "On: your wallpaper zooms when apps open and close. Blur wallpaper waits until it's off. Tap to turn off"
+            hasCopy -> "Off. Tap to make your wallpaper a live one, so it zooms when apps open and close"
+            else -> "Needs a wallpaper set from ${getString(com.oneuiclone.home.R.string.app_name)}, as above"
+        }) {
+            when {
+                live -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Turn off live wallpaper?")
+                    .setMessage("Your wallpaper stays the same picture, as a normal wallpaper.")
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton("Turn off") { _, _ ->
+                        val app = applicationContext
+                        Thread {
+                            val ok = try { com.oneuiclone.home.ui.LiveWallpaper.turnOff(app) } catch (_: Exception) { false }
+                            runOnUiThread {
+                                if (!ok) android.widget.Toast.makeText(app, "Couldn't turn it off", android.widget.Toast.LENGTH_SHORT).show()
+                                if (!isDestroyed) build()
+                            }
+                        }.start()
+                    }
+                    .show()
+                hasCopy -> try {
+                    rebuildOnResume = true
+                    startActivity(com.oneuiclone.home.ui.LiveWallpaper.pickerIntent(this))
+                } catch (_: android.content.ActivityNotFoundException) {
+                    rebuildOnResume = false
+                    android.widget.Toast.makeText(this, "This phone has no live wallpaper picker", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

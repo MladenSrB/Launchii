@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launchii's live wallpaper: your Home wallpaper, zoomed by Home on app opens and closes (LiveWallpaper.kt) -->
+<wallpaper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/live_wallpaper_description"
+    android:showMetadataInPreview="false" />

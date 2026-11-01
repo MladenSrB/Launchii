@@ -97,7 +97,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     val root = RootLayout()
     val scrim = ScrimView(activity)
-    val wallpaper = com.oneuiclone.home.ui.WallpaperLayer(activity)
+    val wallpaper = com.oneuiclone.home.ui.WallpaperLayer(activity).apply { drivesLive = true }
     /** Blurred wallpaper behind widgets set to Style › Blur. */
     private val widgetGlass = com.oneuiclone.home.ui.WidgetGlass().also { g -> wallpaper.onLoaded = { g.rebuild(wallpaper); syncBlurredWallpaper() } }
     val background = BackgroundController(activity, scrim, wallpaper)
@@ -1754,7 +1754,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         dropLaunchCard(fade = false)
         // Left for an app Home didn't open (Recents, a quick switch, a notification): the way back zooms in all the same.
         // Not for the screen going off, so unlocking doesn't play a close.
-        if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake()) {
+        if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake() &&
+            !activity.isChangingConfigurations) {   // recreated (new wallpaper colours): Home stays on screen
             pendingReturnAnim = true
             lastLaunchedApp = null
             lastWidgetLaunch = null
@@ -1776,6 +1777,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             zoomAnim?.cancel()
             wallpaperZoom = 1f
             wallpaper.setZoom(1f)
+            // Launchii's live wallpaper waits, out of sight, at the open zoom, so every close zooms it back
+            if (com.oneuiclone.home.ui.LiveWallpaper.drives) com.oneuiclone.home.ui.LiveWallpaper.park(wallpaperOpenZoom)
         }
     }
 
@@ -1829,6 +1832,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         wallpaper.reloadIfChanged()
         syncBlurredWallpaper()
+        // Home is showing with no close to play (a new instance after a recreate, or a return already under way):
+        // Launchii's live wallpaper follows Home's zoom rather than a parked one.
+        if (!pendingReturnAnim && com.oneuiclone.home.ui.LiveWallpaper.drives) com.oneuiclone.home.ui.LiveWallpaper.setZoom(wallpaperZoom)
         playReturnAnimation()
     }
 
@@ -1876,7 +1882,13 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         animateContentScale(if (folders.isOpen) overlay else homeLayer, 1f, 450, Easing.APP_CLOSE_POSITION)
         // Recents may have left the real wallpaper at another offset: re-centre it now, while our copy covers it.
         centerWallpaper()
-        if (!CLOSE_ZOOMS_WALLPAPER) {
+        if (com.oneuiclone.home.ui.LiveWallpaper.drives) {
+            // Launchii's live wallpaper is the real one: parked at the open zoom while the app covered it, it zooms
+            // back with Home (from wherever it is; a return from Recents without an app has nothing to undo).
+            wallpaperZoom = com.oneuiclone.home.ui.LiveWallpaper.zoom
+            AnimLog.log("live wallpaper close zoom from $wallpaperZoom")
+            animateWallpaperZoom(1f, 600, Easing.CUBIC_OUT)
+        } else if (!CLOSE_ZOOMS_WALLPAPER) {
             // Already at rest once Home was stopped; a translucent app leaves the open zoom up, which follows Home back.
             animateWallpaperZoom(1f, 450, Easing.APP_CLOSE_POSITION)
         } else if (wallpaper.available) {

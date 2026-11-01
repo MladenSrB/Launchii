@@ -75,11 +75,14 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
             if (id != 0) res.getFloat(id).coerceIn(1f, 1.5f) else 1f
         } catch (_: Exception) { 1f }
 
-        /** True while the system wallpaper is one the launcher set itself (so it has the exact copy for blur and zoom). */
+        /**
+         * True while the system wallpaper is one the launcher set itself (so it has the exact copy for blur and zoom),
+         * or Launchii's live wallpaper, which draws that copy.
+         */
         fun hasOwnCopy(context: Context): Boolean = try {
             val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SYSTEM_ID, -1)
             id > 0 && java.io.File(context.filesDir, OWN_FILE).exists() &&
-                WallpaperManager.getInstance(context).getWallpaperId(WallpaperManager.FLAG_SYSTEM) == id
+                (WallpaperManager.getInstance(context).getWallpaperId(WallpaperManager.FLAG_SYSTEM) == id || LiveWallpaper.isActive(context))
         } catch (_: Exception) { false }
 
         /**
@@ -218,7 +221,7 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
 
     private fun ownWallpaper(): Bitmap? = try {
         val id = ownPrefs.getInt(KEY_SYSTEM_ID, -1)
-        if (id < 0 || !ownFile.exists() || wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM) != id) null
+        if (id < 0 || !ownFile.exists() || (wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM) != id && !LiveWallpaper.isActive(context))) null
         else android.graphics.BitmapFactory.decodeFile(ownFile.path)
     } catch (_: Exception) { null }
 
@@ -277,9 +280,13 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
     var holdCopy = false
         set(v) { field = v; updateViews() }
 
+    /** Home's layer: its zoom also drives Launchii's live wallpaper, when that's the wallpaper. */
+    var drivesLive = false
+
     /** Wallpaper zoom (1 = none, 1.3 = HighEndOpenParams). */
     fun setZoom(z: Float) {
         zoom = z
+        if (drivesLive) LiveWallpaper.setZoom(z)
         updateViews()
     }
 
@@ -291,7 +298,9 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
             return
         }
         val zoomed = zoom != 1f
-        sharpView.visibility = if ((zoomed || holdCopy) && blurProgress < 1f) VISIBLE else INVISIBLE
+        // Launchii's live wallpaper zooms itself: the copy would only cross-dissolve with it
+        val live = drivesLive && LiveWallpaper.drives
+        sharpView.visibility = if ((zoomed || holdCopy) && blurProgress < 1f && !live) VISIBLE else INVISIBLE
         val z = zoom * systemScale
         sharpView.scaleX = z; sharpView.scaleY = z
         if (blurProgress > 0f) {

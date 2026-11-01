@@ -21,6 +21,8 @@
          without a prompt once Launchii installed itself. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Launchii's live wallpaper (LiveWallpaper.kt); not required, so devices without live wallpapers still install -->
+    <uses-feature android:name="android.software.live_wallpaper" android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -128,6 +130,18 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".ui.LiveWallpaperService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/live_wallpaper" />
+        </service>
         <service
             android:name=".BadgeService"
             android:exported="true"

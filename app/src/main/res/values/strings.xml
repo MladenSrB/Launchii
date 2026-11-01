@@ -17,4 +17,5 @@
     <string name="split_widget_description">Type two apps to open them in split screen</string>
     <string name="quick_pair_widget">Bubble &amp; Split</string>
     <string name="quick_pair_widget_description">Bubble and Split in one: type an app to open it in a bubble, or two for split screen</string>
+    <string name="live_wallpaper_description">Your Home wallpaper, zooming with Home when apps open and close</string>
 </resources>
