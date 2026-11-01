@@ -44,6 +44,11 @@ import kotlin.math.abs
  * chose to leave the close to the Pixel (0.159), even though the Pixel draws no wallpaper zoom of its own.
  */
 private const val CLOSE_ZOOMS_WALLPAPER = false
+/**
+ * Whether Home also plays the close zoom for apps it didn't open (Recents, a quick switch, a notification), as in
+ * 0.156. Off in 0.160 to test whether that change stopped the Pixel's own wallpaper zoom on closes.
+ */
+private const val RECENTS_CLOSE_ZOOM = false
 /** Home shrink + wallpaper zoom when an app is opened. */
 private const val OPEN_ZOOM_MS = 280L
 private const val OPEN_SCALE = 0.85f
@@ -1749,7 +1754,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         dropLaunchCard(fade = false)
         // Left for an app Home didn't open (Recents, a quick switch, a notification): the way back zooms in all the same.
         // Not for the screen going off, so unlocking doesn't play a close.
-        if (!pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake()) {
+        if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake()) {
             pendingReturnAnim = true
             lastLaunchedApp = null
             lastWidgetLaunch = null
