@@ -40,10 +40,10 @@ import kotlin.math.abs
  * Whether app closes zoom the launcher's wallpaper copy out. Off: they leave the real wallpaper to the system, as they
  * always did for a wallpaper set from another app (no copy). The copy is drawn in the launcher window, which the
  * system fades in during the close, so it cross-dissolved with the real wallpaper at another zoom (a double image).
- * The open zoom is kept (the user likes it). On (0.158, the 0.139 close): with it off the Pixel adds no zoom of its
- * own, so the wallpaper sat still through every close (recording 6520.mp4).
+ * The open zoom is kept (the user likes it). Set to true for the 0.139 close; 0.158 tried that again and the user
+ * chose to leave the close to the Pixel (0.159), even though the Pixel draws no wallpaper zoom of its own.
  */
-private const val CLOSE_ZOOMS_WALLPAPER = true
+private const val CLOSE_ZOOMS_WALLPAPER = false
 /** Home shrink + wallpaper zoom when an app is opened. */
 private const val OPEN_ZOOM_MS = 280L
 private const val OPEN_SCALE = 0.85f
