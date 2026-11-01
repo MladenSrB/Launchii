@@ -59,6 +59,10 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
         const val OWN_FILE = "wallpaper.png"
         const val PREFS = "wallpaper"
         const val KEY_SYSTEM_ID = "system_id"
+        /** Bumped each time the copy is rewritten: under Launchii's live wallpaper a new picture keeps the system id. */
+        const val KEY_COPY_STAMP = "copy_stamp"
+        /** False once the user turned Launchii's live wallpaper off: wallpapers set here then stay image wallpapers. */
+        const val KEY_LIVE_WANTED = "live_wanted"
         const val LOCK_FILE = "wallpaper_lock.png"
         const val KEY_LOCK_ID = "lock_id"
         /** wallpaper_view_blur_saturation — interpreted as a +25 % saturation boost [INF]. */
@@ -96,8 +100,34 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
             tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
             val id = set().takeIf { it > 0 } ?: WallpaperManager.getInstance(context).getWallpaperId(WallpaperManager.FLAG_SYSTEM)
             if (!tmp.renameTo(file)) throw java.io.IOException("couldn't keep the wallpaper copy")
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SYSTEM_ID, id).commit()
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            prefs.edit().putInt(KEY_SYSTEM_ID, id).putLong(KEY_COPY_STAMP, prefs.getLong(KEY_COPY_STAMP, 0L) + 1).commit()
             return id
+        }
+
+        /**
+         * Sets [bmp] as the Home wallpaper: while Launchii's live wallpaper is on, as the picture it draws (the live
+         * wallpaper stays), else as an image wallpaper. Records it as the copy. Slow: call off the main thread.
+         */
+        fun setHomeBitmap(context: Context, bmp: Bitmap): Int {
+            val wm = WallpaperManager.getInstance(context)
+            if (!LiveWallpaper.isActive(context)) return recordOwnCopy(context, bmp) { wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM) }
+            return recordOwnCopy(context, bmp) { wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM) }.also { LiveWallpaper.contentChanged() }
+        }
+
+        /**
+         * Turning Launchii's live wallpaper on gives Home a new system wallpaper id. The copy (and a blur baked into
+         * it) is the same picture, so it moves over to the new id.
+         */
+        @Synchronized fun adoptLiveId(context: Context) {
+            if (!LiveWallpaper.isActive(context)) return
+            val id = WallpaperManager.getInstance(context).getWallpaperId(WallpaperManager.FLAG_SYSTEM)
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val old = prefs.getInt(KEY_SYSTEM_ID, -1)
+            if (id <= 0 || old < 0 || old == id) return
+            val e = prefs.edit().putInt(KEY_SYSTEM_ID, id)
+            if (prefs.getInt(WallpaperBlur.KEY_BLURRED_ID, -1) == old) e.putInt(WallpaperBlur.KEY_BLURRED_ID, id)
+            e.commit()
         }
 
         /**
@@ -106,8 +136,15 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
          */
         fun setDisplayBitmap(context: Context, bmp: Bitmap, which: Int) {
             val wm = WallpaperManager.getInstance(context)
-            if (which and WallpaperManager.FLAG_SYSTEM != 0) recordOwnCopy(context, bmp) { wm.setBitmap(bmp, null, true, which) }
-            else wm.setBitmap(bmp, null, true, which)
+            when {
+                // Launchii's live wallpaper stays on Home with the new picture; a lock screen gets its own image
+                which and WallpaperManager.FLAG_SYSTEM != 0 && LiveWallpaper.isActive(context) -> {
+                    setHomeBitmap(context, bmp)
+                    if (which and WallpaperManager.FLAG_LOCK != 0) wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_LOCK)
+                }
+                which and WallpaperManager.FLAG_SYSTEM != 0 -> recordOwnCopy(context, bmp) { wm.setBitmap(bmp, null, true, which) }
+                else -> wm.setBitmap(bmp, null, true, which)
+            }
             if (which and WallpaperManager.FLAG_LOCK != 0) recordLockCopy(context, bmp)
         }
 
@@ -214,7 +251,7 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
      * because SharedPreferences keeps its listeners weakly.
      */
     private val ownCopyRecorded = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == KEY_SYSTEM_ID) reload()
+        if (key == KEY_SYSTEM_ID || key == KEY_COPY_STAMP) reload()
     }
     @Volatile private var destroyed = false
     init { ownPrefs.registerOnSharedPreferenceChangeListener(ownCopyRecorded) }
@@ -225,9 +262,9 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
         else android.graphics.BitmapFactory.decodeFile(ownFile.path)
     } catch (_: Exception) { null }
 
-    /** System wallpaper id and own-copy id the last [reload] saw. */
-    @Volatile private var loaded = -2 to -2
-    private fun ids() = wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM) to ownPrefs.getInt(KEY_SYSTEM_ID, -1)
+    /** System wallpaper id, own-copy id and copy stamp the last [reload] saw. */
+    @Volatile private var loaded = Triple(-2, -2, -2L)
+    private fun ids() = Triple(wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM), ownPrefs.getInt(KEY_SYSTEM_ID, -1), ownPrefs.getLong(KEY_COPY_STAMP, 0L))
 
     /**
      * A wallpaper replaced while the launcher was away (Settings › Blur wallpaper) or whose own copy was

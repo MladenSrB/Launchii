@@ -18,10 +18,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 
 /**
- * Launchii's live wallpaper (test, 0.162): the launcher's own wallpaper copy ([WallpaperLayer.OWN_FILE]), drawn by
- * this app so Home zooms the real wallpaper itself on app opens and closes. The system only zooms an image wallpaper
- * for the Pixel Launcher, and Home's copy of it (drawn in the launcher window, which the system fades during the
- * transitions) cross-dissolved with it. The engine runs in the launcher's process, so the zoom is passed in memory.
+ * Launchii's live wallpaper (0.162; on by default for wallpapers set here since 0.163): the launcher's own wallpaper
+ * copy ([WallpaperLayer.OWN_FILE]), drawn by this app so Home zooms the real wallpaper itself on app opens and closes.
+ * The system only zooms an image wallpaper for the Pixel Launcher, and Home's copy of it (drawn in the launcher window,
+ * which the system fades during the transitions) cross-dissolved with it. Blur wallpaper bakes into the picture it
+ * draws ([WallpaperLayer.setHomeBitmap]). The engine runs in the launcher's process, so the zoom is passed in memory.
  */
 object LiveWallpaper {
     /** The zoom the engines draw (1 = rest, as the system shows an image wallpaper). Main thread. */
@@ -53,6 +54,14 @@ object LiveWallpaper {
         engines.forEach { it.requestDraw() }
     }
 
+    /** The picture changed (a new wallpaper, or Blur wallpaper): any thread. */
+    fun contentChanged() = engines.forEach { it.reload() }
+
+    /** Whether wallpapers set in Launchii should go on as its live wallpaper (until the user turns it off). */
+    fun wanted(context: Context) = prefs(context).getBoolean(WallpaperLayer.KEY_LIVE_WANTED, true)
+    fun setWanted(context: Context, on: Boolean) { prefs(context).edit().putBoolean(WallpaperLayer.KEY_LIVE_WANTED, on).apply() }
+    private fun prefs(context: Context) = context.getSharedPreferences(WallpaperLayer.PREFS, Context.MODE_PRIVATE)
+
     internal fun attach(e: LiveWallpaperService.ZoomEngine) { engines += e }
     internal fun detach(e: LiveWallpaperService.ZoomEngine) { engines -= e }
     internal fun visibilityChanged() {
@@ -74,8 +83,21 @@ object LiveWallpaper {
         val bmp = BitmapFactory.decodeFile(java.io.File(context.filesDir, WallpaperLayer.OWN_FILE).path) ?: return false
         val lockToo = try { wm.getWallpaperInfo(WallpaperManager.FLAG_LOCK)?.packageName == context.packageName } catch (_: Exception) { false } ||
             wm.getWallpaperId(WallpaperManager.FLAG_LOCK) <= 0
-        WallpaperLayer.setDisplayBitmap(context, bmp,
-            WallpaperManager.FLAG_SYSTEM or if (lockToo) WallpaperManager.FLAG_LOCK else 0)
+        // a blurred Home's lock screen showed the sharp original: it keeps it
+        val sharp = if (lockToo && WallpaperBlur.isBlurred(context))
+            BitmapFactory.decodeFile(java.io.File(context.filesDir, WallpaperBlur.SHARP_FILE).path) else null
+        WallpaperBlur.keepBlur(context) {
+            // straight to the system: WallpaperLayer's setters keep a live wallpaper that's on
+            val both = lockToo && sharp == null
+            WallpaperLayer.recordOwnCopy(context, bmp) {
+                wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM or if (both) WallpaperManager.FLAG_LOCK else 0)
+            }
+            val lockBmp = if (both) bmp else sharp
+            if (lockBmp != null) {
+                if (!both) wm.setBitmap(lockBmp, null, true, WallpaperManager.FLAG_LOCK)
+                WallpaperLayer.recordLockCopy(context, lockBmp)
+            }
+        }
         return true
     }
 }
@@ -97,24 +119,43 @@ class LiveWallpaperService : WallpaperService() {
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val matrix = Matrix()
         private val baseScale = WallpaperLayer.systemScale()
-        /** Drawing thread only. */
+        /** Drawing thread only. [lockBitmap]: the sharp original, for a lock screen sharing a blurred Home. */
         private var bitmap: Bitmap? = null
+        private var lockBitmap: Bitmap? = null
         @Volatile private var colors: WallpaperColors? = null
         /** Guarded by [lock]: false once the surface is gone, so the thread never draws into a dead one. */
         private var surfaceReady = false
         @Volatile var visible = false; private set
         @Volatile private var drawZoom = 1f
+        /** Unlocked: Home's zoom and picture replace the lock screen's. */
+        private val unlocked = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) = requestDraw()
+        }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
             setOffsetNotificationsEnabled(false)
-            if (!isPreview) LiveWallpaper.attach(this)
+            if (!isPreview) {
+                LiveWallpaper.attach(this)
+                registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT), Context.RECEIVER_NOT_EXPORTED)
+            }
             drawZoom = if (isPreview) 1f else LiveWallpaper.zoom
-            handler.post { load() }
+            handler.post {
+                if (!isPreview) WallpaperLayer.adoptLiveId(this@LiveWallpaperService)
+                load()
+            }
         }
+
+        /** Any thread: re-reads the picture. */
+        fun reload() { handler.post { load() } }
 
         private fun load() {
             val src = BitmapFactory.decodeFile(java.io.File(filesDir, WallpaperLayer.OWN_FILE).path) ?: return
+            val lockShared = try {
+                WallpaperManager.getInstance(this@LiveWallpaperService).getWallpaperId(WallpaperManager.FLAG_LOCK) <= 0
+            } catch (_: Exception) { false }
+            lockBitmap = if (!lockShared || !WallpaperBlur.isBlurred(this@LiveWallpaperService)) null
+                else BitmapFactory.decodeFile(java.io.File(filesDir, WallpaperBlur.SHARP_FILE).path)?.let { it.copy(Bitmap.Config.HARDWARE, false) ?: it }
             val small = Bitmap.createScaledBitmap(src, max(1, src.width / 8), max(1, src.height / 8), true)
             colors = try { WallpaperColors.fromBitmap(small) } catch (_: Exception) { null }
             // a hardware bitmap stays on the GPU, so each zoom frame is a single textured draw
@@ -153,6 +194,7 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         override fun onDestroy() {
+            if (!isPreview) try { unregisterReceiver(unlocked) } catch (_: Exception) {}
             LiveWallpaper.detach(this)
             synchronized(lock) { surfaceReady = false }
             thread.quitSafely()
@@ -166,7 +208,8 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         private fun draw() {
-            val b = bitmap ?: return
+            val locked = isLocked()
+            val b = (if (locked) lockBitmap else null) ?: bitmap ?: return
             synchronized(lock) {
                 if (!surfaceReady) return
                 val holder = surfaceHolder
@@ -177,7 +220,7 @@ class LiveWallpaperService : WallpaperService() {
                     val w = frame.width().toFloat(); val h = frame.height().toFloat()
                     val fit = max(w / b.width, h / b.height)
                     // the lock screen shows it at rest: Home's zoom belongs to Home
-                    val z = baseScale * if (isLocked()) 1f else drawZoom
+                    val z = baseScale * if (locked) 1f else drawZoom
                     matrix.setScale(fit, fit)
                     matrix.postTranslate((w - b.width * fit) / 2f, (h - b.height * fit) / 2f)
                     matrix.postScale(z, z, w / 2f, h / 2f)

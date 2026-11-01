@@ -53,6 +53,8 @@ class WallpaperActivity : Activity() {
     companion object {
         /** Return to the caller after setting (Wallpaper and style shows the result in its preview) instead of Home. */
         const val EXTRA_STAY = "app.launchii.extra.STAY"
+        private const val REQUEST_LIVE = 7
+        private const val STATE_WHICH = "which"
         /** Photos can be pinched up to this far past filling the screen. */
         const val MAX_ZOOM = 4f
         private const val HINT_MS = 2600L
@@ -72,6 +74,7 @@ class WallpaperActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setWhich = savedInstanceState?.getInt(STATE_WHICH) ?: 0
         window.setDecorFitsSystemWindows(false)
         val uri = intent?.data
         if (uri == null) { finish(); return }
@@ -213,9 +216,17 @@ class WallpaperActivity : Activity() {
         apply.isEnabled = false
         val (w, h) = displaySize()
         val out = crop.render(w, h)
+        val lw = com.oneuiclone.home.ui.LiveWallpaper
+        // Home's picture goes on as Launchii's live wallpaper: only the copy is written before Android's preview, as
+        // an image wallpaper set first changes the colours and restarts the preview mid-connect (it crashed on AOSP)
+        val offerLive = which and WallpaperManager.FLAG_SYSTEM != 0 && lw.wanted(this) && !lw.isActive(this)
         io.execute {
             val ok = try {
-                WallpaperLayer.setDisplayBitmap(this, out, which)
+                if (!offerLive) WallpaperLayer.setDisplayBitmap(this, out, which)
+                else {
+                    WallpaperLayer.recordOwnCopy(this, out) { WallpaperManager.getInstance(this).getWallpaperId(WallpaperManager.FLAG_SYSTEM) }
+                    if (which and WallpaperManager.FLAG_LOCK != 0) WallpaperLayer.setDisplayBitmap(this, out, WallpaperManager.FLAG_LOCK)
+                }
                 true
             } catch (e: Exception) {
                 android.util.Log.w("OneUiHome", "set wallpaper failed", e)
@@ -230,22 +241,82 @@ class WallpaperActivity : Activity() {
                     return@runOnUiThread
                 }
                 setResult(RESULT_OK)
-                // Home's wallpaper blur goes on now rather than when Home next resumes, so Wallpaper and style's
-                // preview (which reloads on the change) shows Home as it will be
-                if (which and WallpaperManager.FLAG_SYSTEM != 0) com.oneuiclone.home.ui.WallpaperBlur.apply(
-                    applicationContext, com.oneuiclone.home.settings.Prefs(this).homeBlurLevel, onlyIfReplaced = true) {}
-                // Show it where it was set: Home for the home screen, back to the app for a lock-screen-only one
-                // (or back to Wallpaper and style, whose preview shows either).
-                val stay = intent.getBooleanExtra(EXTRA_STAY, false)
-                if (!stay && which and WallpaperManager.FLAG_SYSTEM != 0) {
-                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(packageName)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } else if (!stay) {
-                    Toast.makeText(this, "Lock screen wallpaper set", Toast.LENGTH_SHORT).show()
-                }
-                finish()
+                setWhich = which
+                if (offerLive) offerLive() else { blurHome(); done() }
             }
         }
+    }
+
+    /**
+     * Home's wallpaper blur goes on now rather than when Home next resumes, so Wallpaper and style's preview (which
+     * reloads on the change) shows Home as it will be.
+     */
+    private fun blurHome() {
+        if (setWhich and WallpaperManager.FLAG_SYSTEM != 0) com.oneuiclone.home.ui.WallpaperBlur.apply(
+            applicationContext, com.oneuiclone.home.settings.Prefs(this).homeBlurLevel, onlyIfReplaced = true) {}
+    }
+
+    /**
+     * Where the wallpaper was set ([setWallpaper]'s which), for [done] after the live wallpaper preview. Kept across
+     * the recreate a new wallpaper's colours cause.
+     */
+    private var setWhich = 0
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_WHICH, setWhich)
+    }
+
+    /**
+     * Home's wallpaper goes on as Launchii's live wallpaper (so it zooms with app opens and closes). Android asks
+     * once, in its live wallpaper preview; afterwards new pictures keep it. Declining there stops asking (Settings ›
+     * Live wallpaper turns it back on).
+     */
+    private fun offerLive() {
+        try {
+            startActivityForResult(com.oneuiclone.home.ui.LiveWallpaper.pickerIntent(this), REQUEST_LIVE)
+        } catch (_: android.content.ActivityNotFoundException) {
+            onActivityResult(REQUEST_LIVE, RESULT_CANCELED, null)
+        }
+    }
+
+    /** Back from the live wallpaper preview: declined, the picture goes on as an image wallpaper instead. */
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_LIVE) return
+        if (com.oneuiclone.home.ui.LiveWallpaper.isActive(this)) { blurHome(); done(); return }
+        com.oneuiclone.home.ui.LiveWallpaper.setWanted(this, false)
+        val app = applicationContext
+        io.execute {
+            val ok = try {
+                val bmp = android.graphics.BitmapFactory.decodeFile(java.io.File(filesDir, WallpaperLayer.OWN_FILE).path)
+                bmp != null && WallpaperLayer.setHomeBitmap(app, bmp) > 0
+            } catch (e: Exception) {
+                android.util.Log.w("OneUiHome", "set wallpaper failed", e)
+                false
+            }
+            runOnUiThread {
+                if (!ok) Toast.makeText(app, "Couldn't set that wallpaper", Toast.LENGTH_SHORT).show()
+                blurHome()
+                done()
+            }
+        }
+    }
+
+    /**
+     * Show it where it was set: Home for the home screen, back to the app for a lock-screen-only one (or back to
+     * Wallpaper and style, whose preview shows either).
+     */
+    private fun done() {
+        val stay = intent.getBooleanExtra(EXTRA_STAY, false)
+        if (!stay && setWhich and WallpaperManager.FLAG_SYSTEM != 0) {
+            startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } else if (!stay) {
+            Toast.makeText(this, "Lock screen wallpaper set", Toast.LENGTH_SHORT).show()
+        }
+        finish()
     }
 
     private fun cancel() {

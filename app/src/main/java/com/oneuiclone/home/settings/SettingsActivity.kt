@@ -147,25 +147,28 @@ class SettingsActivity : OneUiPage() {
     }
 
     /**
-     * Launchii's live wallpaper (test): the same picture, drawn by Launchii so Home can zoom the real wallpaper on
-     * app opens and closes. Turning it off puts the picture back as a normal image wallpaper.
+     * Launchii's live wallpaper: the same picture, drawn by Launchii so Home can zoom the real wallpaper on app opens
+     * and closes. Wallpapers set in Launchii go on as it until it's turned off here, which puts the picture back as a
+     * normal image wallpaper.
      */
     private fun liveWallpaperItem(hasCopy: Boolean) {
-        val live = com.oneuiclone.home.ui.LiveWallpaper.isActive(this)
-        item("Live wallpaper (test)", when {
-            live -> "On: your wallpaper zooms when apps open and close. Blur wallpaper waits until it's off. Tap to turn off"
-            hasCopy -> "Off. Tap to make your wallpaper a live one, so it zooms when apps open and close"
-            else -> "Needs a wallpaper set from ${getString(com.oneuiclone.home.R.string.app_name)}, as above"
+        val lw = com.oneuiclone.home.ui.LiveWallpaper
+        val live = lw.isActive(this)
+        item("Live wallpaper", when {
+            live -> "On: your wallpaper zooms when apps open and close. Tap to turn off"
+            hasCopy -> "Off. Tap to turn on, so your wallpaper zooms when apps open and close"
+            else -> "Set a wallpaper from ${getString(com.oneuiclone.home.R.string.app_name)}, as above, and it zooms when apps open and close"
         }) {
             when {
                 live -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle("Turn off live wallpaper?")
-                    .setMessage("Your wallpaper stays the same picture, as a normal wallpaper.")
+                    .setMessage("Your wallpaper stays the same picture, as a normal wallpaper, and it won't zoom when apps open and close.")
                     .setNegativeButton(android.R.string.cancel, null)
                     .setPositiveButton("Turn off") { _, _ ->
                         val app = applicationContext
+                        lw.setWanted(app, false)
                         Thread {
-                            val ok = try { com.oneuiclone.home.ui.LiveWallpaper.turnOff(app) } catch (_: Exception) { false }
+                            val ok = try { lw.turnOff(app) } catch (_: Exception) { false }
                             runOnUiThread {
                                 if (!ok) android.widget.Toast.makeText(app, "Couldn't turn it off", android.widget.Toast.LENGTH_SHORT).show()
                                 if (!isDestroyed) build()
@@ -174,8 +177,9 @@ class SettingsActivity : OneUiPage() {
                     }
                     .show()
                 hasCopy -> try {
+                    lw.setWanted(this, true)
                     rebuildOnResume = true
-                    startActivity(com.oneuiclone.home.ui.LiveWallpaper.pickerIntent(this))
+                    startActivity(lw.pickerIntent(this))
                 } catch (_: android.content.ActivityNotFoundException) {
                     rebuildOnResume = false
                     android.widget.Toast.makeText(this, "This phone has no live wallpaper picker", android.widget.Toast.LENGTH_SHORT).show()

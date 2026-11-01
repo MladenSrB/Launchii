@@ -13,16 +13,18 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Settings › Blur wallpaper, baked in: the Home screen wallpaper itself is replaced by a blurred copy (the lock
- * screen keeps the sharp one), so nothing blurs at runtime and the system's own app-close animation shows it
- * blurred too. The sharp original is kept to re-blur at another strength, or to put back when it's turned off.
+ * Settings › Blur wallpaper, baked in: the Home screen wallpaper itself is replaced by a blurred copy (or Launchii's
+ * live wallpaper draws one; the lock screen keeps the sharp one), so nothing blurs at runtime and the system's own
+ * app-close animation shows it blurred too. The sharp original is kept to re-blur at another strength, or to put back when it's turned off.
  */
 object WallpaperBlur {
 
     enum class Result { DONE, UNCHANGED, NO_ACCESS }
 
-    private const val SHARP_FILE = "wallpaper_sharp.png"
-    private const val KEY_BLURRED_ID = "blurred_id"
+    const val SHARP_FILE = "wallpaper_sharp.png"
+    const val KEY_BLURRED_ID = "blurred_id"
+    /** The copy stamp the blur wrote: under Launchii's live wallpaper a new picture keeps the system id. */
+    private const val KEY_BLURRED_STAMP = "blurred_stamp"
     private const val KEY_LEVEL = "blurred_level"
 
     /** One worker for the whole process: Settings and the launcher never write the wallpaper at the same time. */
@@ -32,7 +34,36 @@ object WallpaperBlur {
      * Last system wallpaper a sync looked at, with the launcher copy's id then, so one that can't be read isn't
      * retried on every colours change, but is once the launcher records its copy (after the change, when it set it).
      */
-    @Volatile private var lastSeen = -1 to -1
+    @Volatile private var lastSeen = Triple(-1, -1, -1L)
+    /**
+     * Held by a blur run and by [keepBlur]: the copy [keepBlur] rewrites must not look like a new picture to a check
+     * started by its own change (it blurred the blurred picture again).
+     */
+    private val lock = Any()
+
+    /** True while Home shows the blur baked from the kept original (not a picture set since). */
+    private fun isOurs(prefs: android.content.SharedPreferences, current: Int) =
+        prefs.getInt(KEY_BLURRED_ID, -1).let { it > 0 && it == current } &&
+            prefs.getLong(KEY_BLURRED_STAMP, 0L) == prefs.getLong(WallpaperLayer.KEY_COPY_STAMP, 0L)
+
+    /** True while Home's wallpaper is blurred by this (the sharp original is in [SHARP_FILE]). */
+    fun isBlurred(context: Context): Boolean = try {
+        isOurs(context.getSharedPreferences(WallpaperLayer.PREFS, Context.MODE_PRIVATE),
+            WallpaperManager.getInstance(context).getWallpaperId(WallpaperManager.FLAG_SYSTEM))
+    } catch (_: Exception) { false }
+
+    /**
+     * Runs [replace], which puts the same picture back as Home's wallpaper under a new id (Launchii's live wallpaper
+     * turned off). A blur baked into it stays known as one, so it's never blurred a second time.
+     */
+    fun keepBlur(context: Context, replace: () -> Unit) = synchronized(lock) {
+        val wm = WallpaperManager.getInstance(context)
+        val prefs = context.getSharedPreferences(WallpaperLayer.PREFS, Context.MODE_PRIVATE)
+        val ours = isOurs(prefs, wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM))
+        replace()
+        if (ours) prefs.edit().putInt(KEY_BLURRED_ID, wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM))
+            .putLong(KEY_BLURRED_STAMP, prefs.getLong(WallpaperLayer.KEY_COPY_STAMP, 0L)).commit()
+    }
 
     /**
      * Makes the Home wallpaper match [level] (0 = sharp, 1 = the Apps screen's full blur).
@@ -42,7 +73,7 @@ object WallpaperBlur {
         val app = context.applicationContext
         io.execute {
             val r = try {
-                run(app, level, onlyIfReplaced)
+                synchronized(lock) { run(app, level, onlyIfReplaced) }
             } catch (e: Exception) {
                 android.util.Log.w("OneUiHome", "wallpaper blur failed", e)
                 Result.NO_ACCESS
@@ -52,22 +83,22 @@ object WallpaperBlur {
     }
 
     private fun run(context: Context, level: Float, onlyIfReplaced: Boolean): Result {
-        // Setting a blurred image would replace Launchii's live wallpaper (test): blur waits until it's off
-        if (LiveWallpaper.isActive(context)) return Result.UNCHANGED
+        // just turned on, Launchii's live wallpaper shows the same (maybe blurred) picture under a new id
+        WallpaperLayer.adoptLiveId(context)
         val wm = WallpaperManager.getInstance(context)
         val prefs = context.getSharedPreferences(WallpaperLayer.PREFS, Context.MODE_PRIVATE)
         val current = wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM)
-        val ours = prefs.getInt(KEY_BLURRED_ID, -1).let { it > 0 && it == current }
-        val seen = current to prefs.getInt(WallpaperLayer.KEY_SYSTEM_ID, -1)
+        val ours = isOurs(prefs, current)
+        val seen = Triple(current, prefs.getInt(WallpaperLayer.KEY_SYSTEM_ID, -1), prefs.getLong(WallpaperLayer.KEY_COPY_STAMP, 0L))
         if (onlyIfReplaced && (level <= 0f || ours || seen == lastSeen)) return Result.UNCHANGED
         val sharpFile = File(context.filesDir, SHARP_FILE)
 
         if (level <= 0f) {
             if (ours) {
                 val sharp = BitmapFactory.decodeFile(sharpFile.path) ?: return Result.NO_ACCESS
-                setHome(context, wm, sharp)
+                setHome(context, sharp)
             }
-            prefs.edit().remove(KEY_BLURRED_ID).remove(KEY_LEVEL).commit()
+            prefs.edit().remove(KEY_BLURRED_ID).remove(KEY_BLURRED_STAMP).remove(KEY_LEVEL).commit()
             return if (ours) Result.DONE else Result.UNCHANGED
         }
         if (ours && prefs.getFloat(KEY_LEVEL, -1f) == level) return Result.UNCHANGED
@@ -77,22 +108,26 @@ object WallpaperBlur {
                 sharpFile.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
             } ?: run { lastSeen = seen; return Result.NO_ACCESS }
         val shared = wm.getWallpaperId(WallpaperManager.FLAG_LOCK) <= 0
-        val id = setHome(context, wm, blur(sharp, level))
+        val id = setHome(context, blur(sharp, level))
         // a lock screen that showed Home's wallpaper keeps the sharp one (for the Wallpaper and style preview)
         if (shared) WallpaperLayer.recordLockCopy(context, sharp)
-        prefs.edit().putInt(KEY_BLURRED_ID, id).putFloat(KEY_LEVEL, level).commit()
+        prefs.edit().putInt(KEY_BLURRED_ID, id).putLong(KEY_BLURRED_STAMP, prefs.getLong(WallpaperLayer.KEY_COPY_STAMP, 0L))
+            .putFloat(KEY_LEVEL, level).commit()
         return Result.DONE
     }
 
     /** The current Home wallpaper at display size: the launcher's own copy (a wallpaper set elsewhere can't be read). */
     private fun readCurrent(context: Context, prefs: android.content.SharedPreferences, current: Int): Bitmap? {
         val own = File(context.filesDir, WallpaperLayer.OWN_FILE)
-        return if (prefs.getInt(WallpaperLayer.KEY_SYSTEM_ID, -1) == current && own.exists()) BitmapFactory.decodeFile(own.path) else null
+        val shown = prefs.getInt(WallpaperLayer.KEY_SYSTEM_ID, -1) == current || LiveWallpaper.isActive(context)
+        return if (shown && own.exists()) BitmapFactory.decodeFile(own.path) else null
     }
 
-    /** Sets [bmp] as the Home wallpaper only and records it as the launcher's exact copy (for the open/close zoom). */
-    private fun setHome(context: Context, wm: WallpaperManager, bmp: Bitmap): Int =
-        WallpaperLayer.recordOwnCopy(context, bmp) { wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM) }
+    /**
+     * Sets [bmp] as the Home wallpaper only (the picture Launchii's live wallpaper draws, while it's on) and records it
+     * as the launcher's exact copy (for the open/close zoom).
+     */
+    private fun setHome(context: Context, bmp: Bitmap): Int = WallpaperLayer.setHomeBitmap(context, bmp)
 
     /**
      * The Apps screen's look at [level]: blurred at quarter resolution (as [WallpaperLayer] does) with RenderEffect's
