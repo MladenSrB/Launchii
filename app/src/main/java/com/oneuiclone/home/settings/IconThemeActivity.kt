@@ -9,7 +9,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 
 /**
- * Icons (Home screen edit mode, Settings): the icon style and the rows that go with it, then icon size and app labels.
+ * Icons (Home screen edit mode, Settings): the icon shape, the icon theme and the rows that go with it, then icon size
+ * and app labels.
  * Rows come and go as the style changes; the dock strip stays fixed at the top and follows every change, the
  * sliders included.
  */
@@ -81,6 +82,99 @@ class IconThemeActivity : OneUiPage() {
     private fun refreshDock() = preview.render(StylePreview.Look.of(prefs, iconScale = liveScale ?: prefs.iconScale,
         transparency = liveTransparency ?: prefs.glassIconTransparency), stripWidth() / 3, stripWidth()) { _, dock -> dockStrip.bitmap = dock }
 
+    /**
+     * Icon shape: a row with the current shape in a chip; tapping it opens every shape as a tile under it (tap one to
+     * use it), and tapping it again closes them.
+     */
+    private fun shapeCard() = card {
+        val c = current ?: return@card
+        var chosen = prefs.iconShape
+        val glyph = ShapeGlyph(this, text).apply { shape = chosen }
+        val chevron = android.widget.ImageView(this).apply { setImageDrawable(Chevron(text, dp(10f), d)) }
+        val chip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(14f), dp(9f), dp(12f), dp(9f))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 100f * d; setColor(if (night) 0xFF2A2A2C.toInt() else 0xFFEDEDF0.toInt()) }
+            addView(glyph, LinearLayout.LayoutParams(dp(20f), dp(20f)))
+            addView(chevron, LinearLayout.LayoutParams(dp(10f), dp(10f)).apply { marginStart = dp(8f) })
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12f) }
+        }
+        val tiles = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(12f), dp(2f), dp(12f), dp(14f))
+            visibility = View.GONE
+        }
+        lateinit var r: LinearLayout
+        r = row("Icon shape", com.oneuiclone.home.icons.IconShape.name(chosen), sub, chip, {
+            val open = tiles.visibility != View.VISIBLE
+            tiles.visibility = if (open) View.VISIBLE else View.GONE
+            chevron.animate().rotation(if (open) 180f else 0f).setDuration(200).start()
+        })
+        val inactive = if (night) 0xFF4A4A4C.toInt() else 0xFFC4C4C8.toInt()
+        val picked = (primary and 0x00FFFFFF) or 0x26000000
+        fun mark(tile: View, on: Boolean) {
+            val box = tile.findViewWithTag<View>("box")
+            box.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16f * d
+                setColor(if (on) picked else android.graphics.Color.TRANSPARENT)
+                setStroke(dp(2f), if (on) primary else android.graphics.Color.TRANSPARENT)
+            }
+            tile.findViewWithTag<ShapeGlyph>("glyph").color = if (on) primary else inactive
+            tile.findViewWithTag<android.widget.TextView>("name").setTextColor(if (on) text else sub)
+            tile.isSelected = on
+        }
+        for (id in com.oneuiclone.home.icons.IconShape.ALL) {
+            val tile = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+                contentDescription = com.oneuiclone.home.icons.IconShape.name(id)
+                addView(FrameLayout(this@IconThemeActivity).apply {
+                    tag = "box"
+                    addView(ShapeGlyph(this@IconThemeActivity, inactive).apply { tag = "glyph"; shape = id },
+                        FrameLayout.LayoutParams(dp(34f), dp(34f), android.view.Gravity.CENTER))
+                }, LinearLayout.LayoutParams(dp(56f), dp(56f)))
+                addView(android.widget.TextView(this@IconThemeActivity).apply {
+                    tag = "name"
+                    text = com.oneuiclone.home.icons.IconShape.name(id)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                    typeface = com.oneuiclone.home.ui.Fonts.ui(this@IconThemeActivity, 500)
+                    setPadding(0, dp(6f), 0, 0)
+                })
+                setOnClickListener {
+                    if (id == chosen) return@setOnClickListener
+                    chosen = id
+                    prefs.iconShape = id
+                    glyph.shape = id
+                    ((r.getChildAt(0) as LinearLayout).getChildAt(1) as android.widget.TextView).text = com.oneuiclone.home.icons.IconShape.name(id)
+                    for (i in 0 until tiles.childCount) tiles.getChildAt(i).let { t -> mark(t, t.contentDescription == contentDescription) }
+                    refreshDock()
+                }
+            }
+            mark(tile, id == chosen)
+            tiles.addView(tile, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        c.addView(tiles)
+        c.layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
+    }
+
+    /** An icon shape (IconShape) filled in [color], as big as the view. */
+    private class ShapeGlyph(context: android.content.Context, color: Int) : View(context) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+        private val path = android.graphics.Path()
+        var shape = com.oneuiclone.home.icons.IconShape.SQUIRCLE
+            set(v) { field = v; invalidate() }
+        var color: Int
+            get() = paint.color
+            set(v) { paint.color = v; invalidate() }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val s = minOf(width, height).toFloat()
+            com.oneuiclone.home.icons.IconShape.path(path, width / 2f, height / 2f, s, shape)
+            canvas.drawPath(path, paint)
+        }
+    }
+
     private fun layout() {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
 
@@ -97,7 +191,12 @@ class IconThemeActivity : OneUiPage() {
         page.addView(list)
 
         // the controls, scrolling only if larger text makes them taller than the screen
-        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12f), 0, dp(12f), dp(24f)) }
+        list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(12f), 0, dp(12f), dp(24f))
+            // the cards below slide along as the shape tiles open and close
+            layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
+        }
+        shapeCard()
         card {
             val style = style(prefs)
             lateinit var themedRows: List<View>
@@ -110,7 +209,7 @@ class IconThemeActivity : OneUiPage() {
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }
             }
-            dropdown("Icon style", STYLES, style, SUMMARIES) { s ->
+            dropdown("Icon theme", STYLES, style, SUMMARIES) { s ->
                 prefs.themedIcons = s in THEMED
                 prefs.glassIcons = s == 2
                 prefs.darkIcons = s == 3

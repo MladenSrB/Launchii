@@ -17,8 +17,8 @@ android {
         applicationId = "app.launchii"
         minSdk = 33
         targetSdk = 36
-        versionCode = 163
-        versionName = "0.163"
+        versionCode = 164
+        versionName = "0.164"
     }
 
     signingConfigs {

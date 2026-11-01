@@ -8,7 +8,6 @@ import android.graphics.BitmapShader
 import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
@@ -18,14 +17,13 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
-import androidx.core.graphics.PathParser
 import com.oneuiclone.home.R
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
  * Re-implementation of One UI 8.5's icon-tray pipeline (spec §16):
- * layers → emboss highlight (SRC_OVER) → emboss shadow (MULTIPLY) → night layer → squircle mask.
+ * layers → emboss highlight (SRC_OVER) → emboss shadow (MULTIPLY) → night layer → icon shape mask (the squircle by default).
  */
 class IconFactory(private val context: Context) {
 
@@ -48,11 +46,11 @@ class IconFactory(private val context: Context) {
         private val CHROME = setOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
         /** The logo's width as a share of the plate (One UI's Chrome: ≈ 74 %). */
         private const val CHROME_LOGO_FRACTION = 0.74f
-        /** Icon style › Dot ([homeIcon]'s look): the glyph as an even grid of dots, black on paper or white on black. */
+        /** Icon theme › Dot ([homeIcon]'s look): the glyph as an even grid of dots, black on paper or white on black. */
         const val LOOK_DOT = "dot"
-        /** Icon style › Prism: the glyph in a gradient of the app's own colour, on a white or graphite plate. */
+        /** Icon theme › Prism: the glyph in a gradient of the app's own colour, on a white or graphite plate. */
         const val LOOK_PRISM = "prism"
-        /** Icon style › Stencil: the glyph cut through a black plate, showing the wallpaper behind the icon frosted. */
+        /** Icon theme › Stencil: the glyph cut through a black plate, showing the wallpaper behind the icon frosted. */
         const val LOOK_STENCIL = "stencil"
         private const val DOT_PLATE_LIGHT = 0xFFF3F2ED.toInt()
         private const val DOT_PLATE_DARK = 0xFF141414.toInt()
@@ -100,17 +98,12 @@ class IconFactory(private val context: Context) {
             intArrayOf(169, 169), intArrayOf(96, 189), intArrayOf(22, 169), intArrayOf(2, 96),
         )
 
-        fun maskPath(size: Float): Path {
-            val p = PathParser.createPathFromPathData(ONE_UI_MASK)
-            val m = Matrix().apply { setScale(size / 100f, size / 100f) }
-            p.transform(m)
-            return p
-        }
+        /** The icon shape (Icons › Icon shape, [IconShape.current]) in a [size] box. */
+        fun maskPath(size: Float): Path = IconShape.path(size)
     }
 
     private val highlight: Bitmap = decode(R.drawable.oneui_emboss_highlight)
     private val shadow: Bitmap = decode(R.drawable.oneui_emboss_shadow)
-    private val baseMask: Path = PathParser.createPathFromPathData(ONE_UI_MASK)
 
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val highlightPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { blendMode = BlendMode.SRC_OVER }
@@ -882,6 +875,8 @@ class IconFactory(private val context: Context) {
     }
 
     private fun applyEmboss(c: Canvas, size: Int) {
+        // the bitmaps follow the squircle's edge; another shape gets the same rims drawn along its own
+        if (!IconShape.isSquircle) { IconShape.drawEmboss(c, size); return }
         val dst = Rect(0, 0, size, size)
         c.drawBitmap(highlight, null, dst, highlightPaint)
         c.drawBitmap(shadow, null, dst, shadowPaint)
@@ -889,8 +884,7 @@ class IconFactory(private val context: Context) {
 
     private fun clip(layers: Bitmap, size: Int): Bitmap {
         val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val path = Path()
-        baseMask.transform(Matrix().apply { setScale(size / 100f, size / 100f) }, path)
+        val path = maskPath(size.toFloat())
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         p.shader = BitmapShader(layers, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         Canvas(out).drawPath(path, p)

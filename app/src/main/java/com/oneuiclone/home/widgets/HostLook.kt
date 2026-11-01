@@ -101,7 +101,8 @@ class HostLook private constructor(
             val cellW = (size.width * m.density - cellGap * (spanX - 1)) / spanX
             val cellH = size.height * m.density
             val labelPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, if (samsung) ONE_UI_LABEL_SP else L3_LABEL_SP, m)
-            val mask = systemMask()
+            // in Launchii, Launchii's own icon shape (Icons › Icon shape); elsewhere the system's
+            val mask = if (defaultHome(context) == context.packageName) com.oneuiclone.home.icons.IconShape.path(MASK_SIZE) else systemMask()
             // the icon and its label must fit the cell's height (a label line is ~1.4× its text size)
             var icon: Int; val gap: Int
             if (samsung) {

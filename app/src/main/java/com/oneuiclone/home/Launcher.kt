@@ -319,6 +319,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             val nr = AppRepository(activity, iconFactory, dp.iconSizePx).also {
                 it.themedIcons = prefs.themedIcons; it.themeAllApps = prefs.themeAllApps; it.plateAlpha = prefs.iconPlateAlpha
                 it.darkIcons = prefs.darkIcons; it.minimalIcons = prefs.minimalIcons; it.iconLook = prefs.iconLook; it.iconMode = prefs.iconMode
+                it.iconShape = prefs.iconShape
             }
             repo = nr
             model = WorkspaceModel(activity, nr)
@@ -327,8 +328,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         } else {
             val themeChanged = r.themedIcons != prefs.themedIcons || r.themeAllApps != prefs.themeAllApps ||
                 r.plateAlpha != prefs.iconPlateAlpha || r.darkIcons != prefs.darkIcons ||
-                r.minimalIcons != prefs.minimalIcons || r.iconLook != prefs.iconLook || r.iconMode != prefs.iconMode
+                r.minimalIcons != prefs.minimalIcons || r.iconLook != prefs.iconLook || r.iconMode != prefs.iconMode ||
+                r.iconShape != prefs.iconShape
             r.themedIcons = prefs.themedIcons
+            r.iconShape = prefs.iconShape
             r.iconLook = prefs.iconLook
             r.iconMode = prefs.iconMode
             r.darkIcons = prefs.darkIcons
@@ -1280,7 +1283,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private val appsScreenThemed get() = (prefs.themedIcons || prefs.darkIcons) && prefs.themeAppsScreen
 
     /**
-     * Apps screen and search icons: the app's own colours, or Home's (theme, glass or dark) with Icon style ›
+     * Apps screen and search icons: the app's own colours, or Home's (theme, glass or dark) with Icon theme ›
      * Apply to Apps screen and search on.
      */
     private fun setAppsIcon(v: IconView, app: AppInfo) {
@@ -1594,8 +1597,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             this.fromAlpha = fromAlpha
             this.fromColor = fromColor
             this.icon = iconBitmap
-            if (v != null) startRadius = icon.width() * com.oneuiclone.home.ui.LaunchCard.ICON_RADIUS
-            else {
+            if (v != null) {
+                startRadius = icon.width() * com.oneuiclone.home.icons.IconShape.corner(com.oneuiclone.home.ui.LaunchCard.ICON_RADIUS)
+                // the card starts as the icon's own shape
+                if (!com.oneuiclone.home.icons.IconShape.isSquircle) fromShape = com.oneuiclone.home.icons.IconShape.current
+            } else {
                 startRadius = 26f * activity.resources.displayMetrics.density        // the widget's clip (RoundedWidgetView)
                 fromIconPx = dp.iconSizePx.toFloat()
                 fadeIn = true

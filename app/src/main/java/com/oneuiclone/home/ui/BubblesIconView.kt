@@ -8,7 +8,7 @@ import android.graphics.Path
 import android.graphics.PathMeasure
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
-import androidx.core.graphics.PathParser
+import com.oneuiclone.home.icons.IconShape
 import com.oneuiclone.home.device.DeviceProfile
 import com.oneuiclone.home.icons.IconFactory
 import com.oneuiclone.home.motion.Easing
@@ -163,9 +163,7 @@ class BubblesIconView(context: Context, dp: DeviceProfile) : IconView(context, d
             ringSize = iconSize
             val pad = s * RING_PAD
             ringPath.reset()
-            PathParser.createPathFromPathData(RING_PATH).transform(Matrix().apply {
-                setScale((s + 2 * pad) / 100f, (s + 2 * pad) / 100f); postTranslate(-pad, -pad)
-            }, ringPath)
+            IconShape.path(ringPath, s / 2f, s / 2f, s + 2 * pad)
             ringMeasure = PathMeasure(ringPath, true)
             ringPaint.strokeWidth = s * 0.03f
             ringPaint.setShadowLayer(s * 0.03f, 0f, 0f, 0xCCFFFFFF.toInt())
@@ -199,8 +197,6 @@ class BubblesIconView(context: Context, dp: DeviceProfile) : IconView(context, d
     }
 
     private companion object {
-        /** The One UI icon shape (IconFactory.ONE_UI_MASK) redrawn to start at the top and run clockwise. */
-        const val RING_PATH = "M50,1C77.063,1,99,6.935,99,50C99,93.063,77.063,99,50,99C22.935,99,1,93.063,1,50C1,6.935,22.935,1,50,1z"
         const val RING_PAD = 0.07f
         /** BubblesWidget's spacing between posts, and the system's usual time to answer the last, for the ring's creep. */
         const val POST_MS = 300f

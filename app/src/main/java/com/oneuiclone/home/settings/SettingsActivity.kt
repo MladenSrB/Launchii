@@ -73,7 +73,7 @@ class SettingsActivity : OneUiPage() {
             item("Wallpaper and style", "Wallpaper, blur and colour palette, with a preview") {
                 startActivity(Intent(this@SettingsActivity, WallpaperStyleActivity::class.java))
             }
-            item("Icons", "Icon style, size and labels") {
+            item("Icons", "Icon shape, theme, size and labels") {
                 startActivity(Intent(this@SettingsActivity, IconThemeActivity::class.java))
             }
             toggle("Pop-up folders", "Open folders in a small window over the Home screen instead of full screen.", prefs.popupFolders) { prefs.popupFolders = it }

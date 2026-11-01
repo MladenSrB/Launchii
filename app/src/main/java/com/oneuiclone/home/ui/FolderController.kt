@@ -70,6 +70,8 @@ class FolderController(
          *  sides (43.065 of 49 in ONE_UI_MASK; along the horizontal ones it's 27.063 of 49, the circle's). */
         const val CIRCLE_K = 0.5523f
         const val SQUIRCLE_V = 0.8789f
+        /** Pop-up reveal with an icon shape other than the squircle: how far along the shape has grown past the card. */
+        const val SHAPE_GONE = 0.4f
         /** Pop-up folder grid limits (Launcher3 numFolderColumns / numFolderRows); more apps page. */
         const val POPUP_MAX_COLS = 4
         const val POPUP_MAX_ROWS = 3
@@ -592,11 +594,12 @@ class FolderPanel(
     }
 
     // ---- pop-up reveal ----
-    /** The card's visible shape at the start of the reveal: the folder icon's squircle plate, in card coordinates. */
+    /** The card's visible shape at the start of the reveal: the folder icon's plate (in the icon shape), in card coordinates. */
     private val revealFrom = RectF()
     private var reveal = 1f
     private val revealRect = RectF()
     private val revealPath = android.graphics.Path()
+    private val revealShape = android.graphics.Path()
     /** The folder icon's colour over the card while it's still icon-sized (Original style). */
     private var iconTint: View? = null
 
@@ -619,8 +622,20 @@ class FolderPanel(
                 val f = reveal
                 revealRect.set(revealFrom.left + (0f - revealFrom.left) * f, revealFrom.top + (0f - revealFrom.top) * f,
                     revealFrom.right + (view.width - revealFrom.right) * f, revealFrom.bottom + (view.height - revealFrom.bottom) * f)
-                val r = revealFrom.width() / 2f + (dp.dp(28f) - revealFrom.width() / 2f) * f
-                roundedShape(revealPath, revealRect, r, FolderController.SQUIRCLE_V + (FolderController.CIRCLE_K - FolderController.SQUIRCLE_V) * f, FolderController.CIRCLE_K)
+                if (com.oneuiclone.home.icons.IconShape.isSquircle) {
+                    val r = revealFrom.width() / 2f + (dp.dp(28f) - revealFrom.width() / 2f) * f
+                    roundedShape(revealPath, revealRect, r, FolderController.SQUIRCLE_V + (FolderController.CIRCLE_K - FolderController.SQUIRCLE_V) * f, FolderController.CIRCLE_K)
+                } else {
+                    // another icon shape: a rectangle rounding into the card's corners, cut to the shape growing out
+                    // from the icon until it holds the whole card
+                    roundedShape(revealPath, revealRect, dp.dp(28f) * f, FolderController.CIRCLE_K, FolderController.CIRCLE_K)
+                    val grow = f / FolderController.SHAPE_GONE
+                    if (grow < 1f) {
+                        val size = revealFrom.width() + (com.oneuiclone.home.icons.IconShape.cover(revealRect.width(), revealRect.height()) - revealFrom.width()) * grow
+                        com.oneuiclone.home.icons.IconShape.path(revealShape, revealRect.centerX(), revealRect.centerY(), size)
+                        revealPath.op(revealShape, android.graphics.Path.Op.INTERSECT)
+                    }
+                }
                 outline.setPath(revealPath)
             }
         }

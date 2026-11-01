@@ -57,6 +57,8 @@ class AppRepository(private val context: Context, private val iconFactory: IconF
     @Volatile var iconLook = ""
     /** Light or dark for Dot and Prism (IconFactory.MODE_*). */
     @Volatile var iconMode = com.oneuiclone.home.icons.IconFactory.MODE_AUTO
+    /** The icon shape the icons were last cut to (IconFactory reads IconShape.current as it draws). */
+    @Volatile var iconShape = com.oneuiclone.home.icons.IconShape.SQUIRCLE
     /** Glass icons: how opaque a themed icon's plate is (1 = solid). */
     @Volatile var plateAlpha = 1f
 

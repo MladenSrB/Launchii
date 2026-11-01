@@ -56,7 +56,7 @@ class StylePreview(private val activity: Activity) {
 
     /** The icon settings being previewed (sliders preview before they're saved). */
     data class Look(val iconScale: Int, val themed: Boolean, val themeAll: Boolean, val plateAlpha: Float, val labels: Boolean, val dark: Boolean,
-                    val minimal: Boolean, val look: String, val mode: String) {
+                    val minimal: Boolean, val look: String, val mode: String, val shape: String) {
         companion object {
             /** The saved settings, with any slider being dragged in their place. */
             fun of(prefs: Prefs, iconScale: Int = prefs.iconScale, transparency: Int = prefs.glassIconTransparency) = Look(
@@ -69,6 +69,7 @@ class StylePreview(private val activity: Activity) {
                 minimal = prefs.minimalIcons,
                 look = prefs.iconLook,
                 mode = prefs.iconMode,
+                shape = prefs.iconShape,
             )
         }
     }
@@ -197,7 +198,7 @@ class StylePreview(private val activity: Activity) {
         val l = loaded ?: return
         val gen = ++generation
         val dp = profile(look.iconScale)
-        val key = listOf(dp.iconSizePx, look.themed, look.themeAll, look.plateAlpha, look.dark, look.minimal, look.look, look.mode, iconFactory.isNight())
+        val key = listOf(dp.iconSizePx, look.themed, look.themeAll, look.plateAlpha, look.dark, look.minimal, look.look, look.mode, look.shape, iconFactory.isNight())
         val draw = { made: Map<AppKey, Bitmap> ->
             if (gen == generation) drawHome(l, dp, look, made, homeWidth, dockWidth).let { (h, d) -> done(h, d) }
         }

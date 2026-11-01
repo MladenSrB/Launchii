@@ -30,7 +30,7 @@ class LaunchCard(context: Context) : View(context) {
      */
     var fromAlpha = 1f
     /**
-     * A dark, Dot, Prism or Stencil icon's plate colour (Icon style › Dark, Dot, Prism, Stencil): the card grows in it for the first [DARK_HOLD] of the way,
+     * A dark, Dot, Prism or Stencil icon's plate colour (Icon theme › Dark, Dot, Prism, Stencil): the card grows in it for the first [DARK_HOLD] of the way,
      * light or dark mode alike, then turns into [color]; the full icon waits until then too. Null: [color] throughout.
      */
     var fromColor: Int? = null
@@ -41,6 +41,11 @@ class LaunchCard(context: Context) : View(context) {
         set(v) { field = v; splashIconAt = android.os.SystemClock.uptimeMillis(); invalidate() }
     private var splashIconAt = 0L
     var startRadius = 0f
+    /**
+     * An icon shape (IconShape) other than the squircle the card's rounded rectangle approximates: the card is
+     * clipped to it, growing out from the icon, until it holds the whole card ([SHAPE_GONE] of the way).
+     */
+    var fromShape: String? = null
     var endRadius = 0f
     var splashIconPx = 0f
     /** Fraction of the screen the card grows to, centred (above 1: past the edges). */
@@ -67,6 +72,7 @@ class LaunchCard(context: Context) : View(context) {
     private val iconRect = RectF()
     private val iconBounds = Rect()
     private val clip = Path()
+    private val shapeClip = Path()
 
     override fun onDraw(canvas: Canvas) {
         val p = progress
@@ -85,7 +91,15 @@ class LaunchCard(context: Context) : View(context) {
         val shown = if (fadeIn) (pc / FADE_IN).coerceAtMost(1f) else 1f
         val solid = lerp(fromAlpha, 1f, (pc / FROM_ALPHA_GONE).coerceAtMost(1f))
         cardPaint.alpha = (Color.alpha(c) * shown * solid).toInt()
+        val shape = fromShape?.takeIf { pc < SHAPE_GONE }
+        if (shape != null) {
+            val size = lerp(from.width(), com.oneuiclone.home.icons.IconShape.cover(rect.width(), rect.height()), pc / SHAPE_GONE)
+            com.oneuiclone.home.icons.IconShape.path(shapeClip, rect.centerX(), rect.centerY(), size, shape)
+            canvas.save()
+            canvas.clipPath(shapeClip)
+        }
         canvas.drawRoundRect(rect, r, r, cardPaint)
+        if (shape != null) canvas.restore()
 
         // the icon stays centred in the card, growing from its Home size into the splash circle
         val size = lerp(if (fromIconPx < 0f) from.width() else fromIconPx, splashIconPx, pc)
@@ -135,6 +149,8 @@ class LaunchCard(context: Context) : View(context) {
         /** Corner radius of a Home icon as a fraction of its size; the card's clip morphs from it to a circle. */
         const val ICON_RADIUS = 0.3f
         private const val SWAP_MS = 120L
+        /** With [fromShape], how far the card is along when the shape has grown past all of it. */
+        private const val SHAPE_GONE = 0.4f
         /** With [fadeIn], the card is opaque from this much of the way. */
         private const val FADE_IN = 0.3f
         /** The card is solid from this much of the way (about 125 ms in), whatever [fromAlpha]. */

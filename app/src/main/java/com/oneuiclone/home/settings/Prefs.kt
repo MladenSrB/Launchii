@@ -7,6 +7,9 @@ import android.content.SharedPreferences
 class Prefs(context: Context) {
     val sp: SharedPreferences = context.getSharedPreferences("home_settings", Context.MODE_PRIVATE)
 
+    // whatever reads the settings first (Home, a widget, a settings page) sets the icon shape for this process
+    init { com.oneuiclone.home.icons.IconShape.current = iconShape }
+
     var homeCols: Int get() = sp.getInt("home_cols", 4); set(v) = sp.edit().putInt("home_cols", v).apply()
     var homeRows: Int get() = sp.getInt("home_rows", 6); set(v) = sp.edit().putInt("home_rows", v).apply()
     var appsCols: Int get() = sp.getInt("apps_cols", 4); set(v) = sp.edit().putInt("apps_cols", v).apply()
@@ -25,18 +28,21 @@ class Prefs(context: Context) {
     var themedIcons: Boolean get() = sp.getBoolean("themed_icons", false); set(v) = sp.edit().putBoolean("themed_icons", v).apply()
     /** Force a tonal theme icon on apps that don't ship a monochrome layer. */
     var themeAllApps: Boolean get() = sp.getBoolean("theme_all_apps", true); set(v) = sp.edit().putBoolean("theme_all_apps", v).apply()
-    /** Dark icons (Icon style › Dark): every app's icon on a dark plate (IconFactory.createDark); excludes [themedIcons]. */
+    /** Dark icons (Icon theme › Dark): every app's icon on a dark plate (IconFactory.createDark); excludes [themedIcons]. */
     var darkIcons: Boolean get() = sp.getBoolean("dark_icons", false); set(v) = sp.edit().putBoolean("dark_icons", v).apply()
-    /** Minimal icons (Icon style › Minimal): themed icons' white glyph alone, no plate (needs [themedIcons]). */
+    /** Minimal icons (Icon theme › Minimal): themed icons' white glyph alone, no plate (needs [themedIcons]). */
     var minimalIcons: Boolean get() = sp.getBoolean("minimal_icons", false); set(v) = sp.edit().putBoolean("minimal_icons", v).apply()
     /**
-     * Dot, Prism or Stencil icons (Icon style › Dot / Prism / Stencil, IconFactory.LOOK_*): the themed glyph drawn in that
+     * Dot, Prism or Stencil icons (Icon theme › Dot / Prism / Stencil, IconFactory.LOOK_*): the themed glyph drawn in that
      * style on a plate of its own; empty for the other styles (needs [themedIcons]).
      */
     var iconLook: String get() = sp.getString("icon_look", "") ?: ""; set(v) = sp.edit().putString("icon_look", v).apply()
     /** Icons › Light or dark for Dot and Prism: IconFactory.MODE_AUTO (follow dark mode), MODE_LIGHT or MODE_DARK. */
     var iconMode: String get() = sp.getString("icon_mode", com.oneuiclone.home.icons.IconFactory.MODE_AUTO) ?: com.oneuiclone.home.icons.IconFactory.MODE_AUTO
         set(v) = sp.edit().putString("icon_mode", v).apply()
+    /** Icons › Icon shape (IconShape.SQUIRCLE, CIRCLE, …). Setting it moves IconShape.current along with it. */
+    var iconShape: String get() = sp.getString("icon_shape", com.oneuiclone.home.icons.IconShape.SQUIRCLE) ?: com.oneuiclone.home.icons.IconShape.SQUIRCLE
+        set(v) { sp.edit().putString("icon_shape", v).apply(); com.oneuiclone.home.icons.IconShape.current = v }
     /** Theme icons on the Apps screen and in search too, not just Home (needs [themedIcons]). */
     var themeAppsScreen: Boolean get() = sp.getBoolean("theme_apps_screen", false); set(v) = sp.edit().putBoolean("theme_apps_screen", v).apply()
     /**

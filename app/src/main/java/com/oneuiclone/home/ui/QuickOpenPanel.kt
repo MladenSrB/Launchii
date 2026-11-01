@@ -117,7 +117,7 @@ class QuickOpenPanel(
      * radius: a widget's icon.
      */
     class Origin(val bounds: android.graphics.Rect, val tile: Bitmap,
-                 val corner: Float = minOf(bounds.width(), bounds.height()) * ICON_CORNER) {
+                 val corner: Float = minOf(bounds.width(), bounds.height()) * com.oneuiclone.home.icons.IconShape.corner(ICON_CORNER)) {
         val aspect get() = if (bounds.height() > 0) bounds.width().toFloat() / bounds.height() else 1f
     }
 
@@ -1164,7 +1164,7 @@ class QuickOpenPanel(
         private val STRETCH = android.view.animation.PathInterpolator(0.35f, 0f, 0f, 1f)
         private val DECEL = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
         private val ACCEL = android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
-        /** The widget icon's corner, as a share of its size (One UI's squircle, roughly). */
+        /** The widget icon's corner, as a share of its size (One UI's squircle, roughly; IconShape.corner for other shapes). */
         const val ICON_CORNER = 0.36f
         private const val POP_MS = 280L
         private const val POP_STAGGER_MS = 15L
