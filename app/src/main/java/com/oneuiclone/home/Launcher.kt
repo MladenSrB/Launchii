@@ -1746,6 +1746,14 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(launchFallback)
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
         dropLaunchCard(fade = false)
+        // Left for an app Home didn't open (Recents, a quick switch, a notification): the way back zooms in all the same.
+        // Not for the screen going off, so unlocking doesn't play a close.
+        if (!pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake()) {
+            pendingReturnAnim = true
+            lastLaunchedApp = null
+            lastWidgetLaunch = null
+            AnimLog.log("stopped without a launch: return animation armed")
+        }
         if (pendingReturnAnim) {
             contentAnim?.cancel()
             // A folder the app was opened from closes out of sight, so the way back lands on its icon.
@@ -1764,6 +1772,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             wallpaper.setZoom(1f)
         }
     }
+
+    private fun awake(): Boolean =
+        activity.getSystemService(android.os.PowerManager::class.java).isInteractive &&
+            !activity.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
 
     private fun placeUpdatePill() {
         updatePill.translationX = homeSearch.translationX - dp.dp(6f) - updatePill.layoutParams.width
