@@ -137,6 +137,8 @@ class IconThemeActivity : OneUiPage() {
                 addView(android.widget.TextView(this@IconThemeActivity).apply {
                     tag = "name"
                     text = com.oneuiclone.home.icons.IconShape.name(id)
+                    // it spans the column (a vertical LinearLayout's default), so the text is centred in it
+                    gravity = android.view.Gravity.CENTER_HORIZONTAL
                     setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
                     typeface = com.oneuiclone.home.ui.Fonts.ui(this@IconThemeActivity, 500)
                     setPadding(0, dp(6f), 0, 0)
