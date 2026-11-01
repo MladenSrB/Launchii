@@ -33,7 +33,7 @@ class Prefs(context: Context) {
     /** Minimal icons (Icon theme › Minimal): themed icons' white glyph alone, no plate (needs [themedIcons]). */
     var minimalIcons: Boolean get() = sp.getBoolean("minimal_icons", false); set(v) = sp.edit().putBoolean("minimal_icons", v).apply()
     /**
-     * Dot, Prism or Stencil icons (Icon theme › Dot / Prism / Stencil, IconFactory.LOOK_*): the themed glyph drawn in that
+     * Dot, Prism, Stencil, Satin, Doodle, Sprinkles, Comic or Groovy icons (Icon theme, IconFactory.LOOK_*): the themed glyph drawn in that
      * style on a plate of its own; empty for the other styles (needs [themedIcons]).
      */
     var iconLook: String get() = sp.getString("icon_look", "") ?: ""; set(v) = sp.edit().putString("icon_look", v).apply()

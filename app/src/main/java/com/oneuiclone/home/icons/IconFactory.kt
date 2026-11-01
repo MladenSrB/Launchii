@@ -52,6 +52,8 @@ class IconFactory(private val context: Context) {
         const val LOOK_PRISM = "prism"
         /** Icon theme › Stencil: the glyph cut through a black plate, showing the wallpaper behind the icon frosted. */
         const val LOOK_STENCIL = "stencil"
+        /** Icon theme › Satin: the glyph in white, faintly shaded, on a matte black plate (dark in light mode too). */
+        const val LOOK_SATIN = "satin"
         private const val DOT_PLATE_LIGHT = 0xFFF3F2ED.toInt()
         private const val DOT_PLATE_DARK = 0xFF141414.toInt()
         private const val DOT_INK_LIGHT = 0xFF151515.toInt()
@@ -70,6 +72,47 @@ class IconFactory(private val context: Context) {
         private const val STENCIL_PLATE = 0xFF19191D.toInt()
         /** The frost on Stencil's cut-out (white, this opaque), over the blurred wallpaper drawn under the icon. */
         private const val STENCIL_FROST = 0.18f
+        /** Satin's plate: black, lighter toward the top-left corner; its overall colour for the Zoom In card. */
+        private val SATIN_STOPS = intArrayOf(0xFF38383C.toInt(), 0xFF151517.toInt(), 0xFF070708.toInt())
+        private val SATIN_POS = floatArrayOf(0f, 0.38f, 1f)
+        private const val SATIN_PLATE = 0xFF141416.toInt()
+        /** Satin's glyph: a touch bigger than on the themed plate, near-white, with a faint grey along its lower-right edges. */
+        private const val SATIN_GLYPH_SCALE = 1.1f
+        private const val SATIN_INK = 0xFFFAFAFB.toInt()
+        private const val SATIN_SHADE = 0xFF8A8A93.toInt()
+        private const val SATIN_SHADE_ALPHA = 0.35f
+        private const val SATIN_DROP_ALPHA = 0.45f
+        /** Icon theme › Doodle: sketchbook paper with a wobbly ink outline, the glyph hatched in crayon and outlined in ink. */
+        const val LOOK_DOODLE = "doodle"
+        /** Icon theme › Sprinkles: pastel frosting tinted with the app's colour, rainbow sprinkles kept off the glyph. */
+        const val LOOK_SPRINKLES = "sprinkles"
+        /** Icon theme › Comic: the app's colour with halftone dots and an ink border, the glyph yellow in thick ink. */
+        const val LOOK_COMIC = "comic"
+        /** Icon theme › Groovy: the glyph cut out of cream, ringed by three 70s stripes in the app's colour family. */
+        const val LOOK_GROOVY = "groovy"
+        private const val DOODLE_PAPER_LIGHT = 0xFFFFFAF0.toInt()
+        private const val DOODLE_PAPER_DARK = 0xFF1E1D1B.toInt()
+        private const val DOODLE_INK_LIGHT = 0xFF262421.toInt()
+        private const val DOODLE_INK_DARK = 0xFFF2EFE6.toInt()
+        /** Doodle's crayon for apps with no colour of their own. */
+        private const val DOODLE_GREY_LIGHT = 0xFF6B78E6.toInt()
+        private const val DOODLE_GREY_DARK = 0xFF9AA6FF.toInt()
+        /** Sprinkles' frosting for apps with no colour of their own, and the Zoom In card's start (a neutral frosting). */
+        private const val SPRINKLES_GREY = 0xFF7A6CF0.toInt()
+        private const val SPRINKLES_PLATE_LIGHT = 0xFFFBEFF3.toInt()
+        private const val SPRINKLES_PLATE_DARK = 0xFF2A2222.toInt()
+        private val SPRINKLE_COLORS = intArrayOf(0xFFFF5C8A.toInt(), 0xFFFFC93C.toInt(), 0xFF3EC7FF.toInt(), 0xFF7CDB5A.toInt(),
+            0xFFB07CFF.toInt(), 0xFFFF8A3C.toInt(), 0xFFFFFFFF.toInt())
+        private const val SPRINKLE_COUNT = 16
+        private const val COMIC_GREY = 0xFFFF4D6D.toInt()
+        private const val COMIC_INK = 0xFF111111.toInt()
+        private const val COMIC_YELLOW = 0xFFFFE14D.toInt()
+        private const val COMIC_GLYPH_SCALE = 0.97f
+        private const val GROOVY_PLATE_LIGHT = 0xFFFBEFD9.toInt()
+        private const val GROOVY_PLATE_DARK = 0xFF2B2019.toInt()
+        /** Groovy's glyph is smaller than the themed one, to leave room for its stripes; their hue for apps with no colour. */
+        private const val GROOVY_GLYPH_SCALE = 0.72f
+        private const val GROOVY_GREY_HUE = 20f
         /** Prism's gradient for apps with no colour of their own (by chroma): blue into violet. */
         private const val PRISM_GREY_FROM = 0xFF3D8BFF.toInt()
         private const val PRISM_GREY_TO = 0xFF9B5CFF.toInt()
@@ -86,10 +129,15 @@ class IconFactory(private val context: Context) {
             else -> systemNight
         }
 
-        /** A Dot, Prism or Stencil icon's plate colour (the Zoom In card starts from it). */
+        /** A look's plate colour (the Zoom In card starts from it); Comic's, which is each app's colour, starts as its ink. */
         fun lookPlate(look: String, night: Boolean): Int = when (look) {
             LOOK_DOT -> if (night) DOT_PLATE_DARK else DOT_PLATE_LIGHT
             LOOK_STENCIL -> STENCIL_PLATE
+            LOOK_SATIN -> SATIN_PLATE
+            LOOK_DOODLE -> if (night) DOODLE_PAPER_DARK else DOODLE_PAPER_LIGHT
+            LOOK_SPRINKLES -> if (night) SPRINKLES_PLATE_DARK else SPRINKLES_PLATE_LIGHT
+            LOOK_COMIC -> COMIC_INK
+            LOOK_GROOVY -> if (night) GROOVY_PLATE_DARK else GROOVY_PLATE_LIGHT
             else -> if (night) PRISM_PLATE_DARK else PRISM_PLATE_LIGHT
         }
 
@@ -97,6 +145,17 @@ class IconFactory(private val context: Context) {
             intArrayOf(22, 22), intArrayOf(96, 2), intArrayOf(169, 22), intArrayOf(189, 96),
             intArrayOf(169, 169), intArrayOf(96, 189), intArrayOf(22, 169), intArrayOf(2, 96),
         )
+
+        /**
+         * Temporary (0.168, the white-corner bug on the user's phone): how each icon was made ("package/size" →
+         * description), shown by Icons › Icon check.
+         */
+        val DIAG = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        /** A corner pixel just outside every icon shape: its alpha and colour, which should be "a0". */
+        fun corner(b: Bitmap): String = if (b.isRecycled) "recycled" else b.getPixel(1, 1).let {
+            "a${Color.alpha(it)}" + if (Color.alpha(it) > 0) " #%06X".format(it and 0xFFFFFF) else ""
+        }
 
         /** The icon shape (Icons › Icon shape, [IconShape.current]) in a [size] box. */
         fun maskPath(size: Float): Path = IconShape.path(size)
@@ -137,16 +196,21 @@ class IconFactory(private val context: Context) {
             dark && isGame(pkg) -> normal
             // one odd icon must not take Home down with it (icons load at start, so a throw here crash-loops)
             dark -> runCatching { createDark(d, size) }.onFailure { android.util.Log.w("IconFactory", "Dark icon failed: $pkg", it) }.getOrNull() ?: normal
-            styled -> runCatching { createLook(d, size, lookNight(lookMode, night), look, hasMono) }.onFailure { android.util.Log.w("IconFactory", "$look icon failed: $pkg", it) }.getOrNull() ?: normal
+            styled -> runCatching { createLook(d, size, lookNight(lookMode, night), look, hasMono, pkg?.hashCode() ?: 0) }.onFailure { android.util.Log.w("IconFactory", "$look icon failed: $pkg", it) }.getOrNull() ?: normal
             themed && minimal && hasMono -> createMinimal(d, size)
             themed && minimal && (themeAll || forced) -> createTonal(d, size, night, glyphOnly = true)
             themed && hasMono -> createThemed(d, size, night, plateAlpha)
             themed && (themeAll || forced) -> createTonal(d, size, night, plateAlpha)
             else -> normal
+        }.also { out ->
+            if (pkg != null) DIAG["$pkg/$size"] = "src ${d.javaClass.simpleName}" +
+                ((d as? AdaptiveIconDrawable)?.let { " (bg ${it.background?.javaClass?.simpleName}, fg ${it.foreground?.javaClass?.simpleName})" } ?: "") +
+                ", mono $hasMono, styled $styled, own icon ${out === normal}; made: corner ${corner(out)}, " +
+                "${out.config} alpha ${out.hasAlpha()} premul ${out.isPremultiplied} ${out.width}px"
         } to normal
     }
 
-    /** Games keep their own art under Dark icons: it's an illustration, not a logo to restyle. Dot, Prism and Stencil style them too (the user's choice). */
+    /** Games keep their own art under Dark icons: it's an illustration, not a logo to restyle. Every other look styles them (the user's choice: Monopoly GO themed in Dot, Prism and the playful looks). */
     @Suppress("DEPRECATION")
     private fun isGame(pkg: String?): Boolean {
         val info = pkg?.let { runCatching { context.packageManager.getApplicationInfo(it, 0) }.getOrNull() } ?: return false
@@ -181,7 +245,7 @@ class IconFactory(private val context: Context) {
     /** The monochrome layer in white, at the size it has on the themed plate, clipped to the mask. */
     private fun monoGlyph(mono: Drawable, size: Int): Bitmap {
         val glyph = (mono.constantState?.newDrawable(context.resources)?.mutate() ?: mono.mutate()).apply { setTint(Color.WHITE) }
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val inset = (size * 0.25f).roundToInt()
         glyph.bounds = Rect(-inset, -inset, size + inset, size + inset)
         glyph.draw(Canvas(layers))
@@ -189,15 +253,21 @@ class IconFactory(private val context: Context) {
     }
 
     /**
-     * Dot, Prism and Stencil icons ([LOOK_DOT], [LOOK_PRISM], [LOOK_STENCIL]): the themed glyph (the monochrome layer, or the tonal glyph for
-     * apps without one) on a plate of the style's own: Dot and Prism follow light and dark mode, Stencil is dark in both.
+     * Dot, Prism, Stencil and Satin icons ([LOOK_DOT], [LOOK_PRISM], [LOOK_STENCIL], [LOOK_SATIN]): the themed glyph (the monochrome
+     * layer, or the tonal glyph for apps without one) on a plate of the style's own: Dot and Prism follow light and dark mode, Stencil
+     * and Satin are dark in both.
      */
-    fun createLook(src: Drawable, size: Int, night: Boolean, look: String, hasMono: Boolean): Bitmap {
+    fun createLook(src: Drawable, size: Int, night: Boolean, look: String, hasMono: Boolean, seed: Int = 0): Bitmap {
         val mono = (src as? AdaptiveIconDrawable)?.monochrome
         val glyph = if (hasMono && mono != null) monoGlyph(mono, size) else createTonal(src, size, night, glyphOnly = true, bare = true)
         return when (look) {
             LOOK_DOT -> dots(glyph, size, night)
             LOOK_STENCIL -> stencil(glyph, size)
+            LOOK_SATIN -> satin(glyph, size)
+            LOOK_DOODLE -> doodle(glyph, size, night, brandColor(src), seed)
+            LOOK_SPRINKLES -> sprinkles(glyph, size, night, brandColor(src), seed)
+            LOOK_COMIC -> comic(glyph, size, night, brandColor(src))
+            LOOK_GROOVY -> groovy(glyph, size, night, brandColor(src))
             else -> prism(glyph, size, night, brandColor(src))
         }
     }
@@ -211,7 +281,7 @@ class IconFactory(private val context: Context) {
         glyph.getPixels(alpha, 0, size, 0, 0, size, size)
         val box = opaqueBounds(glyph)
         glyph.recycle()
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         c.drawColor(if (night) DOT_PLATE_DARK else DOT_PLATE_LIGHT)
         if (!box.isEmpty) {
@@ -245,7 +315,7 @@ class IconFactory(private val context: Context) {
      * frosted. Recycles [glyph].
      */
     private fun stencil(glyph: Bitmap, size: Int): Bitmap {
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         c.drawPaint(Paint().apply {
             shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), STENCIL_TOP, STENCIL_BOTTOM, Shader.TileMode.CLAMP)
@@ -254,6 +324,269 @@ class IconFactory(private val context: Context) {
         c.drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) })
         c.drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * STENCIL_FROST).roundToInt() })
         glyph.recycle()
+        return clip(layers, size)
+    }
+
+    /**
+     * The glyph in near-white on a matte black plate with a faint light rim (the user's "Hint" mockup): the glyph a little
+     * bigger than on the themed plate, a faint grey along its lower-right edges and a small soft shadow under it, so it
+     * reads almost flat. Lengths are in 24ths of the icon, as in the mockup. Recycles [glyph].
+     */
+    private fun satin(glyph: Bitmap, size: Int): Bitmap {
+        val k = size / 24f
+        val mid = size / 2f
+        // the glyph as a near-white mask, scaled about the centre
+        val ink = blank(size)
+        Canvas(ink).apply {
+            scale(SATIN_GLYPH_SCALE, SATIN_GLYPH_SCALE, mid, mid)
+            drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = android.graphics.PorterDuffColorFilter(SATIN_INK, PorterDuff.Mode.SRC_IN)
+            })
+        }
+        glyph.recycle()
+
+        val layers = blank(size)
+        val c = Canvas(layers)
+        c.drawPaint(Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, size * 0.7f, size.toFloat(), SATIN_STOPS, SATIN_POS, Shader.TileMode.CLAMP)
+        })
+        // the rim: a thin light line just inside the edge, brightest at the top
+        val rim = maskPath(size.toFloat()).apply {
+            transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) })
+        }
+        c.drawPath(rim, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 0.42f * k
+            shader = android.graphics.LinearGradient(0f, 0f, size * 0.4f, size.toFloat(),
+                intArrayOf(0x61FFFFFF, 0x0FFFFFFF, 0x00FFFFFF, 0x1FFFFFFF), floatArrayOf(0f, 0.3f, 0.75f, 1f), Shader.TileMode.CLAMP)
+        })
+        // the small soft shadow under the glyph
+        val offset = IntArray(2)
+        val drop = ink.extractAlpha(Paint().apply { maskFilter = blur(0.4f * k) }, offset)
+        c.drawBitmap(drop, offset[0].toFloat(), offset[1] + 0.3f * k, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            color = Color.BLACK; alpha = (255 * SATIN_DROP_ALPHA).roundToInt()
+        })
+        drop.recycle()
+        c.drawBitmap(ink, 0f, 0f, bitmapPaint)
+        // the faint shade: the glyph minus a soft copy of itself nudged up-left leaves its lower-right edges
+        val shade = blank(size)
+        val nudged = ink.extractAlpha(Paint().apply { maskFilter = blur(0.3f * k) }, offset)
+        Canvas(shade).apply {
+            drawBitmap(ink, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = android.graphics.PorterDuffColorFilter(SATIN_SHADE, PorterDuff.Mode.SRC_IN)
+            })
+            drawBitmap(nudged, offset[0] - 0.25f * k, offset[1] - 0.32f * k, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+            })
+        }
+        nudged.recycle()
+        c.drawBitmap(shade, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * SATIN_SHADE_ALPHA).roundToInt() })
+        shade.recycle()
+        ink.recycle()
+        return clip(layers, size)
+    }
+
+    /** A blur of standard deviation [sigma] px (an SVG stdDeviation), as Android's blur radius. */
+    private fun blur(sigma: Float) =
+        android.graphics.BlurMaskFilter(max(0.5f, (sigma - 0.5f) / 0.57735f), android.graphics.BlurMaskFilter.Blur.NORMAL)
+
+    // The playful looks (the user's mockup, mockups/icon-themes-playful.html). Lengths are in 24ths of the icon, as there.
+
+    /** [glyph] in [color], [scale]d about the centre. */
+    private fun tinted(glyph: Bitmap, size: Int, color: Int, scale: Float = 1f): Bitmap {
+        val out = blank(size)
+        Canvas(out).apply {
+            scale(scale, scale, size / 2f, size / 2f)
+            drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = android.graphics.PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+            })
+        }
+        return out
+    }
+
+    /** [mask] grown by [r] px all round, in [color] (an outline under it): copies stamped around rings out to [r]. */
+    private fun grown(mask: Bitmap, size: Int, r: Float, color: Int): Bitmap {
+        val out = blank(size)
+        val c = Canvas(out)
+        val p = Paint(Paint.FILTER_BITMAP_FLAG).apply { colorFilter = android.graphics.PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN) }
+        c.drawBitmap(mask, 0f, 0f, p)
+        // rings about 1.5 px apart, so thin strokes and small dots grow without gaps
+        val rings = (r / 1.5f).roundToInt().coerceIn(1, 6)
+        for (k in 1..rings) {
+            val ring = r * k / rings
+            val steps = (2 * Math.PI * ring / 1.5f).roundToInt().coerceIn(8, 48)
+            for (i in 0 until steps) {
+                val a = 2 * Math.PI * i / steps
+                c.drawBitmap(mask, (ring * kotlin.math.cos(a)).toFloat(), (ring * kotlin.math.sin(a)).toFloat(), p)
+            }
+        }
+        return out
+    }
+
+    /** [brand] made cheerful at lightness [l]; [grey] for apps with no colour of their own. */
+    private fun candy(brand: Int?, l: Float, grey: Int): Int {
+        if (brand == null) return grey
+        val hsl = FloatArray(3)
+        androidx.core.graphics.ColorUtils.colorToHSL(brand, hsl)
+        return androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], max(hsl[1], 0.78f), l))
+    }
+
+    private fun hue(brand: Int?): Float? = brand?.let { FloatArray(3).also { h -> androidx.core.graphics.ColorUtils.colorToHSL(it, h) }[0] }
+
+    /**
+     * Sketchbook paper with a wobbly ink outline; the glyph coloured in with a crayon hatch in the app's colour, printed a
+     * little off from its ink outline, and tilted a degree or two ([seed]) so no two icons sit quite straight. Recycles [glyph].
+     */
+    private fun doodle(glyph: Bitmap, size: Int, night: Boolean, brand: Int?, seed: Int): Bitmap {
+        val k = size / 24f
+        val mid = size / 2f
+        val rnd = java.util.Random(seed.toLong())
+        val ink = if (night) DOODLE_INK_DARK else DOODLE_INK_LIGHT
+        val crayon = candy(brand, if (night) 0.62f else 0.55f, if (night) DOODLE_GREY_DARK else DOODLE_GREY_LIGHT)
+        // the hatch: crayon strokes at 35–55°, kept to the glyph
+        val hatch = blank(size)
+        Canvas(hatch).apply {
+            rotate(35f + rnd.nextFloat() * 20f, mid, mid)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = crayon }
+            var x = -size.toFloat()
+            while (x < size * 2f) { drawRect(x, -size.toFloat(), x + 0.62f * k, size * 2f, p); x += 1.1f * k }
+        }
+        Canvas(hatch).drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) })
+        // the ink outline: just outside the glyph's edge
+        val outline = grown(glyph, size, 0.4f * k, ink)
+        Canvas(outline).drawBitmap(glyph, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) })
+        glyph.recycle()
+
+        val layers = blank(size)
+        val c = Canvas(layers)
+        c.drawColor(if (night) DOODLE_PAPER_DARK else DOODLE_PAPER_LIGHT)
+        c.save()
+        c.rotate((rnd.nextFloat() - 0.5f) * 6f, mid, mid)
+        c.drawBitmap(hatch, 0.55f * k, 0.5f * k, bitmapPaint)
+        c.drawBitmap(outline, 0f, 0f, bitmapPaint)
+        c.restore()
+        hatch.recycle(); outline.recycle()
+        // the plate's own outline, drawn by hand: inset so its wobble stays inside the shape
+        val edge = maskPath(size.toFloat()).apply { transform(android.graphics.Matrix().apply { setScale(0.92f, 0.92f, mid, mid) }) }
+        c.drawPath(edge, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 0.75f * k; color = ink
+            strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+            pathEffect = android.graphics.ComposePathEffect(android.graphics.CornerPathEffect(1.5f * k),
+                android.graphics.DiscretePathEffect(2.2f * k, 0.3f * k))
+        })
+        return clip(layers, size)
+    }
+
+    /**
+     * Pastel frosting tinted with the app's colour (chocolate-dark at night), 16 rainbow sprinkles scattered by [seed] and
+     * kept off the glyph, and the glyph in a deeper shade with a thin border. Recycles [glyph].
+     */
+    private fun sprinkles(glyph: Bitmap, size: Int, night: Boolean, brand: Int?, seed: Int): Bitmap {
+        val k = size / 24f
+        val rnd = java.util.Random(seed.toLong())
+        val base = candy(brand, 0.5f, SPRINKLES_GREY)
+        val blend = androidx.core.graphics.ColorUtils::blendARGB
+        val plate = if (night) blend(base, 0xFF1B1514.toInt(), 0.78f) else blend(base, Color.WHITE, 0.78f)
+        val ink = if (night) blend(base, Color.WHITE, 0.25f) else blend(base, Color.BLACK, 0.12f)
+
+        val sprinkles = blank(size)
+        Canvas(sprinkles).apply {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            val r = RectF(-1f * k, -0.32f * k, 1f * k, 0.32f * k)
+            for (i in 0 until SPRINKLE_COUNT) {
+                p.color = SPRINKLE_COLORS[i % SPRINKLE_COLORS.size]
+                save()
+                translate((2.5f + rnd.nextFloat() * 19f) * k, (2.5f + rnd.nextFloat() * 19f) * k)
+                rotate(rnd.nextFloat() * 180f)
+                drawRoundRect(r, 0.32f * k, 0.32f * k, p)
+                restore()
+            }
+        }
+        val keepOff = grown(glyph, size, 1.02f * k, Color.BLACK)
+        Canvas(sprinkles).drawBitmap(keepOff, 0f, 0f, Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) })
+        keepOff.recycle()
+        val border = grown(glyph, size, 0.42f * k, if (night) 0xFF2A2020.toInt() else Color.WHITE)
+        val face = tinted(glyph, size, ink)
+        glyph.recycle()
+
+        val layers = blank(size)
+        val c = Canvas(layers)
+        c.drawColor(plate)
+        c.drawBitmap(sprinkles, 0f, 0f, bitmapPaint)
+        c.drawBitmap(border, 0f, 0f, bitmapPaint)
+        c.drawBitmap(face, 0f, 0f, bitmapPaint)
+        sprinkles.recycle(); border.recycle(); face.recycle()
+        applyEmboss(c, size)
+        return clip(layers, size)
+    }
+
+    /**
+     * Pop art: the app's colour with halftone dots fading out toward the top left and a black ink border; the glyph in
+     * comic-book yellow (white for yellow apps) with a thick ink outline and a hard offset shadow. Recycles [glyph].
+     */
+    private fun comic(glyph: Bitmap, size: Int, night: Boolean, brand: Int?): Bitmap {
+        val k = size / 24f
+        val mid = size / 2f
+        val plate = candy(brand, if (night) 0.45f else 0.54f, COMIC_GREY)
+        val yellowApp = hue(brand)?.let { it in 35f..75f } == true
+
+        val dots = blank(size)
+        Canvas(dots).apply {
+            rotate(45f, mid, mid)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = androidx.core.graphics.ColorUtils.blendARGB(plate, Color.BLACK, 0.4f) }
+            val step = 1.5f * k
+            var y = -size * 0.5f
+            while (y < size * 1.5f) {
+                var x = -size * 0.5f
+                while (x < size * 1.5f) { drawCircle(x, y, 0.48f * k, p); x += step }
+                y += step
+            }
+        }
+        Canvas(dots).drawPaint(Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, size.toFloat(), size.toFloat(),
+                intArrayOf(0x00000000, 0x00000000, Color.BLACK), floatArrayOf(0f, 0.25f, 1f), Shader.TileMode.CLAMP)
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+        })
+        val g = tinted(glyph, size, Color.WHITE, COMIC_GLYPH_SCALE)
+        glyph.recycle()
+        val outline = grown(g, size, 0.7f * k, COMIC_INK)
+        val face = tinted(g, size, if (yellowApp) Color.WHITE else COMIC_YELLOW)
+        g.recycle()
+
+        val layers = blank(size)
+        val c = Canvas(layers)
+        c.drawColor(plate)
+        c.drawBitmap(dots, 0f, 0f, bitmapPaint)
+        dots.recycle()
+        val edge = maskPath(size.toFloat()).apply { transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) }) }
+        c.drawPath(edge, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 0.9f * k; color = COMIC_INK })
+        c.drawBitmap(outline, 0.9f * k, 0.9f * k, bitmapPaint)
+        c.drawBitmap(outline, 0f, 0f, bitmapPaint)
+        c.drawBitmap(face, 0f, 0f, bitmapPaint)
+        outline.recycle(); face.recycle()
+        return clip(layers, size)
+    }
+
+    /**
+     * 70s bubble lettering: the glyph, smaller, cut out of a cream plate (espresso at night) and ringed by three stacked
+     * stripes: a deep shade of the app's colour, then two warmer neighbouring hues. Recycles [glyph].
+     */
+    private fun groovy(glyph: Bitmap, size: Int, night: Boolean, brand: Int?): Bitmap {
+        val k = size / 24f
+        val plate = if (night) GROOVY_PLATE_DARK else GROOVY_PLATE_LIGHT
+        val h = hue(brand) ?: GROOVY_GREY_HUE
+        val hsl = { dh: Float, s: Float, l: Float -> androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf((h + dh) % 360f, s, l)) }
+        val stripes = listOf(hsl(0f, 0.62f, if (night) 0.42f else 0.32f) to 2.11f, hsl(22f, 0.8f, 0.52f) to 1.41f, hsl(44f, 0.9f, 0.62f) to 0.7f)
+        val g = tinted(glyph, size, Color.WHITE, GROOVY_GLYPH_SCALE)
+        glyph.recycle()
+
+        val layers = blank(size)
+        val c = Canvas(layers)
+        c.drawColor(plate)
+        for ((color, r) in stripes) grown(g, size, r * k, color).let { c.drawBitmap(it, 0f, 0f, bitmapPaint); it.recycle() }
+        tinted(g, size, plate).let { c.drawBitmap(it, 0f, 0f, bitmapPaint); it.recycle() }
+        g.recycle()
+        applyEmboss(c, size)
         return clip(layers, size)
     }
 
@@ -271,7 +604,7 @@ class IconFactory(private val context: Context) {
         val blur = glyph.extractAlpha(Paint().apply {
             maskFilter = android.graphics.BlurMaskFilter(size * 0.06f, android.graphics.BlurMaskFilter.Blur.NORMAL)
         }, offset)
-        val glow = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val glow = blank(size)
         Canvas(glow).apply {
             drawBitmap(blur, offset[0].toFloat(), offset[1] + size * 0.035f, Paint(Paint.FILTER_BITMAP_FLAG))
             drawPaint(gradient)
@@ -279,7 +612,7 @@ class IconFactory(private val context: Context) {
         blur.recycle()
         Canvas(glyph).drawPaint(gradient)
 
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         c.drawColor(if (night) PRISM_PLATE_DARK else PRISM_PLATE_LIGHT)
         c.drawBitmap(glow, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = if (night) 140 else 102 })
@@ -320,7 +653,7 @@ class IconFactory(private val context: Context) {
      */
     private fun brandColor(src: Drawable): Int? {
         val s = 48
-        val b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val b = blank(s)
         val c = Canvas(b)
         if (src is AdaptiveIconDrawable) drawAdaptive(c, src, s) else drawLegacy(c, src, s)
         val px = IntArray(s * s)
@@ -346,7 +679,7 @@ class IconFactory(private val context: Context) {
      * over a soft shadow so it still reads on a light wallpaper. Recycles [glyph].
      */
     private fun minimal(glyph: Bitmap, size: Int): Bitmap {
-        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val out = blank(size)
         val c = Canvas(out)
         val offset = IntArray(2)
         val shadow = glyph.extractAlpha(Paint().apply {
@@ -375,7 +708,7 @@ class IconFactory(private val context: Context) {
         val glyph = Color.WHITE
         val away = res.getColor(android.R.color.system_accent1_700, null)
 
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         val n = size * size
         val px = IntArray(n)
@@ -462,7 +795,7 @@ class IconFactory(private val context: Context) {
      */
     fun createDark(src: Drawable, size: Int): Bitmap? {
         val n = size * size
-        val work = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val work = blank(size)
         val c = Canvas(work)
         val fg = IntArray(n)
         var brand = Color.BLACK
@@ -537,7 +870,7 @@ class IconFactory(private val context: Context) {
         }
         work.setPixels(fg, 0, size, 0, 0, size, size)
 
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val lc = Canvas(layers)
         lc.drawPaint(Paint().apply {
             shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), DARK_TOP, DARK_BOTTOM, Shader.TileMode.CLAMP)
@@ -555,7 +888,7 @@ class IconFactory(private val context: Context) {
      * shrinking the real icon came out blank or as a square crop.
      */
     private fun createChrome(size: Int, dark: Boolean): Bitmap {
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         if (dark) c.drawPaint(Paint().apply {
             shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), DARK_TOP, DARK_BOTTOM, Shader.TileMode.CLAMP)
@@ -790,7 +1123,7 @@ class IconFactory(private val context: Context) {
      * see-through (glass icons) instead of over black.
      */
     fun create(src: Drawable, size: Int, night: Boolean = isNight(), opaqueBase: Boolean = true): Bitmap {
-        val layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val layers = blank(size)
         val c = Canvas(layers)
         if (src is AdaptiveIconDrawable) {
             drawAdaptive(c, src, size, opaqueBase)
@@ -819,7 +1152,7 @@ class IconFactory(private val context: Context) {
     private fun drawLegacy(c: Canvas, d: Drawable, size: Int) {
         val iw = d.intrinsicWidth.takeIf { it > 0 } ?: size
         val ih = d.intrinsicHeight.takeIf { it > 0 } ?: size
-        val probe = Bitmap.createBitmap(ANALYSIS_SIZE, ANALYSIS_SIZE, Bitmap.Config.ARGB_8888)
+        val probe = blank(ANALYSIS_SIZE)
         val scale = ANALYSIS_SIZE.toFloat() / max(iw, ih)
         val pw = (iw * scale).roundToInt()
         val ph = (ih * scale).roundToInt()
@@ -882,8 +1215,17 @@ class IconFactory(private val context: Context) {
         c.drawBitmap(shadow, null, dst, shadowPaint)
     }
 
+    /**
+     * A new [size]² bitmap, cleared to transparent. Only some icons, only on the user's Android 17 phone and only
+     * in Dot, came out with opaque white corners; [clip] leaves everything outside the shape untouched, so a new
+     * bitmap that isn't cleared would keep a freed icon's pixels there. Not reproduced, so this is a guard, not a
+     * confirmed fix.
+     */
+    private fun blank(size: Int): Bitmap =
+        Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.TRANSPARENT) }
+
     private fun clip(layers: Bitmap, size: Int): Bitmap {
-        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val out = blank(size)
         val path = maskPath(size.toFloat())
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         p.shader = BitmapShader(layers, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)

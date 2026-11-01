@@ -303,6 +303,60 @@ class StylePreview(private val activity: Activity) {
         return home to dockOut
     }
 
+    /**
+     * One tile per look in [looks], [w]×[h]: four of Home's apps (the dock's first) in that look, two by two, on a piece
+     * of the wallpaper; each goes to [done] (main thread) as it's made. Glass looks get the wallpaper blurred under
+     * their plates, as Home draws it.
+     */
+    fun themeTiles(looks: List<Look>, w: Int, h: Int, done: (Int, Bitmap) -> Unit) {
+        val l = loaded ?: return
+        val apps = (l.items.filter { it.container == Container.HOTSEAT }.sortedBy { it.x } +
+            l.items.filter { it.container == Container.WORKSPACE }.sortedWith(compareBy({ it.y }, { it.x })))
+            .filterIsInstance<HomeItem.App>().map { it.key }
+            .plus(l.folders.values.flatten())
+            .distinct().filter { it in l.drawables }.take(4)
+        val wall = l.home ?: gradient(l.homeColors)
+        io.execute {
+            // the wallpaper around the middle of the screen, where the icons sit
+            val cw = (width * 0.8f).toInt()
+            val ch = (cw * h / w.toFloat()).toInt().coerceAtMost(wall.height)
+            val sx = (wall.width - cw) / 2
+            val sy = ((wall.height - ch) * 0.55f).toInt()
+            val patch = Bitmap.createScaledBitmap(Bitmap.createBitmap(wall, sx.coerceAtLeast(0), sy.coerceAtLeast(0),
+                cw.coerceAtMost(wall.width), ch), w, h, true)
+            val soft = Bitmap.createScaledBitmap(Bitmap.createScaledBitmap(patch, (w / 12).coerceAtLeast(1), (h / 12).coerceAtLeast(1), true), w, h, true)
+            val night = iconFactory.isNight()
+            val size = (h * 0.36f).toInt()
+            val gap = size * 0.24f
+            val left = (w - size * 2 - gap) / 2f
+            val top = (h - size * 2 - gap) / 2f
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+            for ((i, look) in looks.withIndex()) {
+                if (io.isShutdown) return@execute
+                val out = patch.copy(Bitmap.Config.ARGB_8888, true)
+                val c = Canvas(out)
+                for ((j, k) in apps.withIndex()) {
+                    val d = l.drawables[k]?.second ?: continue
+                    val icon = try {
+                        iconFactory.homeIcon(d, size, night, look.themed, look.themeAll, look.plateAlpha, look.dark,
+                            k.component.packageName, look.minimal, look.look, look.mode).first
+                    } catch (e: Exception) { continue }
+                    val x = left + (j % 2) * (size + gap)
+                    val y = top + (j / 2) * (size + gap)
+                    if (look.themed && (look.plateAlpha < 1f || look.look == IconFactory.LOOK_STENCIL)) {
+                        c.save()
+                        c.translate(x, y)
+                        c.clipPath(IconFactory.maskPath(size.toFloat()))
+                        c.drawBitmap(soft, -x, -y, paint)
+                        c.restore()
+                    }
+                    c.drawBitmap(icon, x, y, paint)
+                }
+                main.post { if (!io.isShutdown) done(i, out) }
+            }
+        }
+    }
+
     /** The lock screen: its wallpaper under a large stacked clock and the date. */
     fun renderLock(outWidth: Int): Bitmap? {
         val l = loaded ?: return null

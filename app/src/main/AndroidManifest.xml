@@ -107,6 +107,24 @@
             android:taskAffinity="app.launchii.settings"
             android:theme="@android:style/Theme.DeviceDefault.DayNight" />
 
+        <!-- Icons › Icon check (temporary, 0.168: the white-corner bug) -->
+        <activity
+            android:name=".settings.IconCheckActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="false"
+            android:label="Icon check"
+            android:taskAffinity="app.launchii.settings"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+
+        <!-- Icons › Icon theme: every theme as a card -->
+        <activity
+            android:name=".settings.IconThemePickerActivity"
+            android:autoRemoveFromRecents="true"
+            android:exported="false"
+            android:label="Icon theme"
+            android:taskAffinity="app.launchii.settings"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+
         <!-- "Set as wallpaper" from any app: getCropAndSetWallpaperIntent offers CROP_AND_SET_WALLPAPER to the default
              home app before the system cropper (as Niagara does); ATTACH_DATA lists it under "Use as". Runs in the
              caller's task, which gets the result. -->

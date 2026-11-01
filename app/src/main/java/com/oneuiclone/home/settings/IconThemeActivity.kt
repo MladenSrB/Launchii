@@ -21,8 +21,11 @@ class IconThemeActivity : OneUiPage() {
         // plate. 3 Dark: every app on a dark plate, in its own colours. 4 Minimal: themed icons' white glyph alone.
         // 5 Dot: the themed glyph as a dot grid. 6 Prism: the themed glyph in a gradient of the app's colour, on white or graphite.
         // 7 Stencil: the themed glyph cut out of a black plate, the wallpaper showing through frosted.
-        val STYLES = listOf("Default", "Themed", "Frosted", "Dark", "Minimal", "Dot", "Prism", "Stencil")
-        private val SUMMARIES = listOf(
+        // 8 Satin: the themed glyph in white, faintly shaded, on a matte black plate.
+        // 9–12 Doodle, Sprinkles, Comic, Groovy: the playful looks (IconFactory.LOOK_*).
+        val STYLES = listOf("Default", "Themed", "Frosted", "Dark", "Minimal", "Dot", "Prism", "Stencil", "Satin",
+            "Doodle", "Sprinkles", "Comic", "Groovy")
+        val SUMMARIES = listOf(
             "Each app's own icon",
             "Your colour palette on app icons",
             "Theme icons on see-through glass over your wallpaper",
@@ -31,10 +34,43 @@ class IconThemeActivity : OneUiPage() {
             "Symbols drawn in dots, black on paper or white on black",
             "Symbols in a gradient of each app's colour, on white or graphite",
             "Symbols cut out of black, showing your wallpaper frosted",
+            "White symbols on matte black, every app in black and white",
+            "Drawn by hand with a marker and crayon",
+            "Pastel frosting with rainbow sprinkles",
+            "Pop-art halftone with bold black ink",
+            "70s outlines in warm stripes",
         )
-        private val THEMED = setOf(1, 2, 4, 5, 6, 7)
-        /** The styles with a light and a dark version (Dot, Prism), which get Light or dark. */
-        private val LIGHT_AND_DARK = setOf(5, 6)
+        /** The Icon theme page's groups, in order, and the styles in each. */
+        val GROUPS = listOf("Simple" to 0..4, "Stylish" to 5..8, "Playful" to 9..12)
+        private val THEMED = setOf(1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+        /** The styles with a light and a dark version (Dot, Prism and the playful ones), which get Light or dark. */
+        private val LIGHT_AND_DARK = setOf(5, 6, 9, 10, 11, 12)
+        /** Each look's style index. */
+        private val LOOKS = mapOf(
+            5 to com.oneuiclone.home.icons.IconFactory.LOOK_DOT,
+            6 to com.oneuiclone.home.icons.IconFactory.LOOK_PRISM,
+            7 to com.oneuiclone.home.icons.IconFactory.LOOK_STENCIL,
+            8 to com.oneuiclone.home.icons.IconFactory.LOOK_SATIN,
+            9 to com.oneuiclone.home.icons.IconFactory.LOOK_DOODLE,
+            10 to com.oneuiclone.home.icons.IconFactory.LOOK_SPRINKLES,
+            11 to com.oneuiclone.home.icons.IconFactory.LOOK_COMIC,
+            12 to com.oneuiclone.home.icons.IconFactory.LOOK_GROOVY,
+        )
+
+        /** Saves style [s] (Default, Themed, …, Groovy). */
+        fun apply(s: Int, prefs: Prefs) {
+            prefs.themedIcons = s in THEMED
+            prefs.glassIcons = s == 2
+            prefs.darkIcons = s == 3
+            prefs.minimalIcons = s == 4
+            prefs.iconLook = LOOKS[s] ?: ""
+        }
+
+        /** [base] (the saved look) with style [s] in its place, for previews of the styles not chosen. */
+        fun look(s: Int, base: StylePreview.Look, prefs: Prefs) = base.copy(
+            themed = s in THEMED, dark = s == 3, minimal = s == 4, look = LOOKS[s] ?: "",
+            plateAlpha = if (s == 2) 1f - prefs.glassIconTransparency / 100f else 1f,
+        )
         private val MODES = listOf(
             com.oneuiclone.home.icons.IconFactory.MODE_AUTO to "Auto",
             com.oneuiclone.home.icons.IconFactory.MODE_LIGHT to "Light",
@@ -48,9 +84,7 @@ class IconThemeActivity : OneUiPage() {
 
         fun style(prefs: Prefs) = when {
             prefs.darkIcons -> 3; !prefs.themedIcons -> 0
-            prefs.iconLook == com.oneuiclone.home.icons.IconFactory.LOOK_DOT -> 5
-            prefs.iconLook == com.oneuiclone.home.icons.IconFactory.LOOK_PRISM -> 6
-            prefs.iconLook == com.oneuiclone.home.icons.IconFactory.LOOK_STENCIL -> 7
+            prefs.iconLook.isNotEmpty() -> LOOKS.entries.firstOrNull { it.value == prefs.iconLook }?.key ?: 1
             prefs.minimalIcons -> 4; prefs.glassIcons -> 2; else -> 1
         }
     }
@@ -73,9 +107,12 @@ class IconThemeActivity : OneUiPage() {
     }
 
     override fun build() {
-        if (!built) { built = true; layout() }
+        if (!built) { built = true; layout() } else onReturn?.invoke(style(prefs))
         preview.load { refreshDock() }
     }
+
+    /** Shows the saved theme in the Icon theme row, and the rows that go with it. */
+    private var onReturn: ((Int) -> Unit)? = null
 
     private fun stripWidth() = resources.displayMetrics.widthPixels - dp(12f) * 2 - dp(14f) * 2
 
@@ -211,19 +248,13 @@ class IconThemeActivity : OneUiPage() {
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }
             }
-            dropdown("Icon theme", STYLES, style, SUMMARIES) { s ->
-                prefs.themedIcons = s in THEMED
-                prefs.glassIcons = s == 2
-                prefs.darkIcons = s == 3
-                prefs.minimalIcons = s == 4
-                prefs.iconLook = when (s) {
-                    5 -> com.oneuiclone.home.icons.IconFactory.LOOK_DOT
-                    6 -> com.oneuiclone.home.icons.IconFactory.LOOK_PRISM
-                    7 -> com.oneuiclone.home.icons.IconFactory.LOOK_STENCIL
-                    else -> ""
-                }
-                showFor(s); refreshDock()
-            }
+            // the themes have their own page (IconThemePickerActivity); coming back shows the one picked there
+            val chevron = android.widget.ImageView(this).apply { setImageDrawable(Chevron(sub, dp(10f), d, right = true)) }
+            val r = row("Icon theme", STYLES[style], primary, chevron, {
+                startActivity(android.content.Intent(this, IconThemePickerActivity::class.java))
+            })
+            val summary = (r.getChildAt(0) as LinearLayout).getChildAt(1) as android.widget.TextView
+            onReturn = { s -> summary.text = STYLES[s]; showFor(s) }
             modeRows = added {
                 val mode = MODES.indexOfFirst { it.first == prefs.iconMode }.coerceAtLeast(0)
                 dropdown("Light or dark", MODES.map { it.second }, mode, MODE_SUMMARIES) { m ->
@@ -259,6 +290,10 @@ class IconThemeActivity : OneUiPage() {
             toggle("Home screen", null, prefs.homeLabels) { prefs.homeLabels = it }
             toggle("Apps screen", null, prefs.appsLabels) { prefs.appsLabels = it }
         }
+        // temporary (0.168): the white-corner bug
+        card { item("Icon check", "Temporary: shows which icons get white corners, and why") {
+            startActivity(android.content.Intent(this, IconCheckActivity::class.java))
+        } }
         val scroll = ScrollView(this).apply { addView(list); isVerticalScrollBarEnabled = false; clipToPadding = false }
         page.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
