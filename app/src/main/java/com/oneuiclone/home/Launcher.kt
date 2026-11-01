@@ -46,9 +46,9 @@ import kotlin.math.abs
 private const val CLOSE_ZOOMS_WALLPAPER = false
 /**
  * Whether Home also plays the close zoom for apps it didn't open (Recents, a quick switch, a notification), as in
- * 0.156. Off in 0.160 to test whether that change stopped the Pixel's own wallpaper zoom on closes.
+ * 0.156. 0.160 switched it off as a test: the Pixel still drew no wallpaper zoom on closes, so it wasn't the cause.
  */
-private const val RECENTS_CLOSE_ZOOM = false
+private const val RECENTS_CLOSE_ZOOM = true
 /** Home shrink + wallpaper zoom when an app is opened. */
 private const val OPEN_ZOOM_MS = 280L
 private const val OPEN_SCALE = 0.85f
