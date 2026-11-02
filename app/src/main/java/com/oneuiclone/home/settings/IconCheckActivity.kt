@@ -17,9 +17,11 @@ import com.oneuiclone.home.icons.IconFactory
 import com.oneuiclone.home.ui.Fonts
 
 /**
- * Temporary (0.168): Icons › Icon check, for the white corners some icons get on the user's phone only. For each of
- * Home's icons: the icon on a checkerboard drawn by the GPU and in software, whether its corner was clear when it was
- * made (IconFactory.DIAG) and is now, and a software redraw's corner. Icons with a solid corner anywhere come first.
+ * Temporary (0.168, 0.170): Icons › Icon check, for the white corners some icons get on the user's phone only. For each
+ * of Home's icons, on a checkerboard: the icon drawn by the GPU, in software, by the GPU from a fresh copy (new pixels,
+ * so no texture the GPU kept) and from a hardware copy (uploaded once from the bytes as they are now). Then its corner
+ * pixel, the raw bytes there and its loose pixels (IconFactory.loose), and how it was made (IconFactory.DIAG). Icons
+ * with a solid corner or loose pixels come first.
  */
 class IconCheckActivity : OneUiPage() {
 
@@ -40,28 +42,33 @@ class IconCheckActivity : OneUiPage() {
                 Canvas(it).drawBitmap(b, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)); IconFactory.corner(it).also { _ -> it.recycle() }
             }
             val made = IconFactory.DIAG["${app.key.component.packageName}/${b.width}"] ?: "not recorded"
-            val bad = now != "a0" || redraw != "a0" || !made.contains("corner a0")
-            Triple(app, bad, "now: corner $now · redraw $redraw · ${b.config} alpha ${b.hasAlpha()} mutable ${b.isMutable} gen ${b.generationId}\n$made")
+            val (loose, raw) = IconFactory.loose(b)
+            val bad = now != "a0" || redraw != "a0" || !made.contains("corner a0") || loose > 0
+            Triple(app, bad, "now: corner $now · raw $raw · loose $loose · redraw $redraw · ${b.config} alpha ${b.hasAlpha()} mutable ${b.isMutable} gen ${b.generationId}\n$made")
         }.sortedByDescending { it.second }
         val badCount = rows.count { it.second }
         card {
-            current?.addView(text("$badCount of ${rows.size} icons have a solid corner in the bitmap.\n" +
-                "Each row: the icon drawn by the GPU (left) and in software (right), on a checkerboard. " +
-                "If an icon shows white corners here but its numbers say a0, the white is added when it's drawn.", 14f, this.text))
+            current?.addView(text("$badCount of ${rows.size} icons have a solid corner or loose pixels in the bitmap.\n" +
+                "Each row, on a checkerboard: 1 the icon drawn by the GPU, 2 in software, 3 the GPU from a fresh copy, " +
+                "4 the GPU from a hardware copy. Screenshot any row where 1 shows white corners: which of 2–4 are clean " +
+                "tells where the white comes from.", 14f, this.text))
         }
         for ((app, bad, info) in rows) card {
             val c = current ?: return@card
             c.setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+            c.addView(text((if (bad) "⚠ " else "") + app.label, 16f, if (bad) 0xFFFF5C5C.toInt() else this.text))
             val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
-            for (software in listOf(false, true)) top.addView(FrameLayout(this).apply {
+            val b = app.icon
+            val fresh = if (b.isRecycled) null else b.copy(Bitmap.Config.ARGB_8888, false)
+            val hardware = if (b.isRecycled) null else runCatching { b.copy(Bitmap.Config.HARDWARE, false) }.getOrNull()
+            for ((i, shown) in listOf(b, b, fresh, hardware).withIndex()) top.addView(FrameLayout(this).apply {
                 background = Checker(dp(6f))
                 setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
                 addView(ImageView(this@IconCheckActivity).apply {
-                    setImageBitmap(app.icon)
-                    if (software) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                    if (shown != null) setImageBitmap(shown)
+                    if (i == 1) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 }, FrameLayout.LayoutParams(dp(48f), dp(48f)))
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(10f) })
-            top.addView(text((if (bad) "⚠ " else "") + app.label, 16f, if (bad) 0xFFFF5C5C.toInt() else this.text))
             c.addView(top)
             c.addView(text("${app.key.component.packageName}\n$info", 11.5f, sub).apply { setTextIsSelectable(true) })
         }

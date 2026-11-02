@@ -159,6 +159,36 @@ class IconFactory(private val context: Context) {
             "a${Color.alpha(it)}" + if (Color.alpha(it) > 0) " #%06X".format(it and 0xFFFFFF) else ""
         }
 
+        /**
+         * Temporary (0.170): the raw premultiplied bytes, which [Bitmap.getPixel] hides (it reports every alpha-0 pixel
+         * as 0). "Loose" pixels have colour above their alpha, e.g. alpha 0 with white left in: software drawing skips
+         * them but the GPU adds that colour, which would be the white corners. [fix] clears them. Returns the count and
+         * the corner's raw R G B A.
+         */
+        fun loose(b: Bitmap, fix: Boolean = false): Pair<Int, String> {
+            if (b.isRecycled || b.config != Bitmap.Config.ARGB_8888) return 0 to "n/a"
+            val buf = java.nio.ByteBuffer.allocate(b.byteCount)
+            b.copyPixelsToBuffer(buf)
+            val a = buf.array()
+            val row = b.rowBytes
+            val at = row + 4
+            val raw = "%02X %02X %02X %02X".format(a[at].toInt() and 255, a[at + 1].toInt() and 255, a[at + 2].toInt() and 255, a[at + 3].toInt() and 255)
+            var n = 0
+            for (y in 0 until b.height) {
+                var i = y * row
+                for (x in 0 until b.width) {
+                    val al = a[i + 3].toInt() and 255
+                    if ((a[i].toInt() and 255) > al || (a[i + 1].toInt() and 255) > al || (a[i + 2].toInt() and 255) > al) {
+                        n++
+                        if (fix) { a[i] = 0; a[i + 1] = 0; a[i + 2] = 0; if (al == 0) a[i + 3] = 0 }
+                    }
+                    i += 4
+                }
+            }
+            if (fix && n > 0 && b.isMutable) { buf.rewind(); b.copyPixelsFromBuffer(buf) }
+            return n to raw
+        }
+
         /** The icon shape (Icons › Icon shape, [IconShape.current]) in a [size] box. */
         fun maskPath(size: Float): Path = IconShape.path(size)
     }
@@ -205,7 +235,9 @@ class IconFactory(private val context: Context) {
             themed && (themeAll || forced) -> createTonal(d, size, night, plateAlpha)
             else -> normal
         }.also { out ->
-            if (pkg != null) DIAG["$pkg/$size"] = "src ${d.javaClass.simpleName}" +
+            // a loose pixel (colour above its alpha) is invisible to software drawing but drawn by the GPU: clear any
+            val fixed = runCatching { loose(out, fix = true).first }.getOrDefault(-1)
+            if (pkg != null) DIAG["$pkg/$size"] = "loose at made $fixed (cleared), src ${d.javaClass.simpleName}" +
                 ((d as? AdaptiveIconDrawable)?.let { " (bg ${it.background?.javaClass?.simpleName}, fg ${it.foreground?.javaClass?.simpleName})" } ?: "") +
                 ", mono $hasMono, styled $styled, own icon ${out === normal}; made: corner ${corner(out)}, " +
                 "${out.config} alpha ${out.hasAlpha()} premul ${out.isPremultiplied} ${out.width}px"
