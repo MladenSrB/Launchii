@@ -55,7 +55,9 @@ class IconCheckActivity : OneUiPage() {
                 "4 the GPU from a hardware copy. Screenshot any row where 1 shows white corners: which of 2–4 are clean " +
                 "tells where the white comes from.\n" +
                 "Tap a row to try fixes, a second row: 5 corners at alpha 1 instead of 0, 6 a 16-bit colour copy, " +
-                "7 a mipmapped copy, 8 drawn without filtering. Screenshot it: a clean one is the fix to ship.", 14f, this.text))
+                "7 a mipmapped copy, 8 drawn without filtering; and a third row of other ways to draw it: 9 in a GPU layer, " +
+                "10 shrunk to its on-screen size first, 11 drawn through the icon shape (the corners are never drawn), " +
+                "12 with force dark off. Screenshot it: a clean one is the fix to ship.", 14f, this.text))
         }
         for ((app, bad, info) in rows) card {
             val c = current ?: return@card
@@ -75,6 +77,13 @@ class IconCheckActivity : OneUiPage() {
                 val f16 = runCatching { b.copy(Bitmap.Config.RGBA_F16, false) }.getOrNull()
                 val mip = b.copy(Bitmap.Config.ARGB_8888, true).apply { setHasMipMap(true) }
                 c.addView(tiles(listOf(tile(alphaOne), f16?.let { tile(it) }, tile(mip), tile(b, filter = false))), 2)
+                val px = dp(48f)
+                c.addView(tiles(listOf(
+                    tile(b).apply { getChildAt(0).setLayerType(View.LAYER_TYPE_HARDWARE, null) },
+                    tile(Bitmap.createScaledBitmap(b, px, px, true)),
+                    tile(b).apply { (getChildAt(0) as ImageView).setImageDrawable(ThroughShape(b)) },
+                    tile(b).apply { isForceDarkAllowed = false; getChildAt(0).isForceDarkAllowed = false },
+                )), 3)
             }
         }
         val scroll = ScrollView(this).apply { addView(list); isVerticalScrollBarEnabled = false; clipToPadding = false }
@@ -109,6 +118,25 @@ class IconCheckActivity : OneUiPage() {
         text = s; setTextColor(color); setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
         typeface = Fonts.ui(this@IconCheckActivity, 400)
         setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+    }
+
+    /** [b] filled into the icon shape at the bounds' size, so nothing outside the shape is drawn at all. */
+    private class ThroughShape(private val b: Bitmap) : android.graphics.drawable.Drawable() {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        override fun draw(canvas: Canvas) {
+            val s = bounds.width().toFloat()
+            if (s <= 0f || b.isRecycled) return
+            p.shader = android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                .apply { setLocalMatrix(android.graphics.Matrix().apply { setScale(s / b.width, s / b.height) }) }
+            canvas.save()
+            canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+            canvas.drawPath(IconFactory.maskPath(s), p)
+            canvas.restore()
+        }
+        override fun setAlpha(alpha: Int) {}
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
     }
 
     /** A grey and white checkerboard of [cell] px squares, so see-through corners show as see-through. */
