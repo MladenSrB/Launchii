@@ -3,6 +3,8 @@ package com.oneuiclone.home.settings
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.drawable.BitmapDrawable
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
@@ -51,26 +53,29 @@ class IconCheckActivity : OneUiPage() {
             current?.addView(text("$badCount of ${rows.size} icons have a solid corner or loose pixels in the bitmap.\n" +
                 "Each row, on a checkerboard: 1 the icon drawn by the GPU, 2 in software, 3 the GPU from a fresh copy, " +
                 "4 the GPU from a hardware copy. Screenshot any row where 1 shows white corners: which of 2–4 are clean " +
-                "tells where the white comes from.", 14f, this.text))
+                "tells where the white comes from.\n" +
+                "Tap a row to try fixes, a second row: 5 corners at alpha 1 instead of 0, 6 a 16-bit colour copy, " +
+                "7 a mipmapped copy, 8 drawn without filtering. Screenshot it: a clean one is the fix to ship.", 14f, this.text))
         }
         for ((app, bad, info) in rows) card {
             val c = current ?: return@card
             c.setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
             c.addView(text((if (bad) "⚠ " else "") + app.label, 16f, if (bad) 0xFFFF5C5C.toInt() else this.text))
-            val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
             val b = app.icon
             val fresh = if (b.isRecycled) null else b.copy(Bitmap.Config.ARGB_8888, false)
             val hardware = if (b.isRecycled) null else runCatching { b.copy(Bitmap.Config.HARDWARE, false) }.getOrNull()
-            for ((i, shown) in listOf(b, b, fresh, hardware).withIndex()) top.addView(FrameLayout(this).apply {
-                background = Checker(dp(6f))
-                setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
-                addView(ImageView(this@IconCheckActivity).apply {
-                    if (shown != null) setImageBitmap(shown)
-                    if (i == 1) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-                }, FrameLayout.LayoutParams(dp(48f), dp(48f)))
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(10f) })
-            c.addView(top)
-            c.addView(text("${app.key.component.packageName}\n$info", 11.5f, sub).apply { setTextIsSelectable(true) })
+            c.addView(tiles(listOf(b, b, fresh, hardware).mapIndexed { i, shown -> shown?.let { tile(it, software = i == 1) } }))
+            c.addView(text("${app.key.component.packageName}\ncolour space ${b.colorSpace?.name}\n$info", 11.5f, sub))
+            // 5–8: candidate fixes, made on tap only (four more copies of 231 icons would be a lot of memory)
+            var tried = false
+            c.setOnClickListener {
+                if (tried || b.isRecycled) return@setOnClickListener
+                tried = true
+                val alphaOne = b.copy(Bitmap.Config.ARGB_8888, true).apply { Canvas(this).drawColor(0x01000000, PorterDuff.Mode.DST_OVER) }
+                val f16 = runCatching { b.copy(Bitmap.Config.RGBA_F16, false) }.getOrNull()
+                val mip = b.copy(Bitmap.Config.ARGB_8888, true).apply { setHasMipMap(true) }
+                c.addView(tiles(listOf(tile(alphaOne), f16?.let { tile(it) }, tile(mip), tile(b, filter = false))), 2)
+            }
         }
         val scroll = ScrollView(this).apply { addView(list); isVerticalScrollBarEnabled = false; clipToPadding = false }
         page.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -81,6 +86,23 @@ class IconCheckActivity : OneUiPage() {
             insets
         }
         setContentView(page)
+    }
+
+    /** One picture: [b] on a checkerboard, drawn in software or without filtering when asked. */
+    private fun tile(b: Bitmap, software: Boolean = false, filter: Boolean = true) = FrameLayout(this).apply {
+        background = Checker(dp(6f))
+        setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
+        addView(ImageView(this@IconCheckActivity).apply {
+            setImageDrawable(BitmapDrawable(resources, b).apply { isFilterBitmap = filter })
+            if (software) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        }, FrameLayout.LayoutParams(dp(48f), dp(48f)))
+    }
+
+    private fun tiles(views: List<View?>) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(0, dp(4f), 0, dp(4f))
+        for (v in views) addView(v ?: View(this@IconCheckActivity),
+            LinearLayout.LayoutParams(dp(56f), dp(56f)).apply { marginEnd = dp(10f) })
     }
 
     private fun text(s: String, sp: Float, color: Int) = TextView(this).apply {
