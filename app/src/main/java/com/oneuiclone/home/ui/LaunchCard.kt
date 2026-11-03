@@ -68,6 +68,7 @@ class LaunchCard(context: Context) : View(context) {
     private val dimPaint = Paint().apply { color = Color.BLACK }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val iconPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val shaped = com.oneuiclone.home.icons.ShapedIcon()
     private val rect = RectF()
     private val iconRect = RectF()
     private val iconBounds = Rect()
@@ -116,7 +117,7 @@ class LaunchCard(context: Context) : View(context) {
         // plate), leaving a stray arc along the top. It changes shape by fading into the full icon instead.
         icon?.let {
             iconPaint.alpha = ((1f - bigAlpha) * 255).toInt()
-            if (iconPaint.alpha > 0) canvas.drawBitmap(it, null, iconRect, iconPaint)
+            if (iconPaint.alpha > 0) shaped.draw(canvas, it, iconRect, iconPaint)
         }
         canvas.clipPath(clip)
         if (big != null && bigAlpha > 0f) {

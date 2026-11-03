@@ -140,7 +140,7 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
             previews.take(GRID * GRID).forEachIndexed { i, b ->
                 if (i in hiddenPreviews) return@forEachIndexed
                 childRect(i, dst)
-                canvas.drawBitmap(b, null, dst, bmpPaint)
+                shaped.draw(canvas, b, dst, bmpPaint)
             }
         }
         canvas.restore()

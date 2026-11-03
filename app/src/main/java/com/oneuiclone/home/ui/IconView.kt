@@ -71,6 +71,8 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
     var lastTouchX = 0f; var lastTouchY = 0f
 
     private val iconPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    /** Draws the icon through its shape: the Pixel 10's GPU can paint the clear corners white (ShapedIcon). */
+    protected val shaped = com.oneuiclone.home.icons.ShapedIcon()
     protected val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFAFAFA.toInt()
         textSize = dp.labelTextSizePx
@@ -220,7 +222,7 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
             canvas.restore()
         }
         plateGlass?.let { drawPlateGlass(canvas, it, left, top) }
-        canvas.drawBitmap(b, null, dst, iconPaint)
+        shaped.draw(canvas, b, dst, iconPaint)
     }
 
     /**
