@@ -57,6 +57,9 @@ private const val OPEN_HOLD_SCALE = 0.925f
 /** Longest a system close into Home is assumed to run, and longest a launch tapped during one waits for it. */
 private const val CLOSE_MAX_MS = 1200L
 private const val LAUNCH_WAIT_MS = 400L
+/** Longest the close zoom waits for Home to be put back on screen, on phones that never send a gesture contract. */
+private const val RETURN_WAIT_MS = 2000L
+private const val KEY_CONTRACT_SEEN = "contract_seen"
 /** Zoom In open: the card's spring (≈ 95 % open by 240 ms, ~1 % overshoot) and Home zooming toward the icon. */
 private const val ZOOM_IN_STIFFNESS = 300f
 private const val ZOOM_IN_DAMPING = 0.84f
@@ -1396,6 +1399,27 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
     }
 
+    /**
+     * A gesture contract has come at least once, so this phone's recents lands closing apps on their icons with
+     * Home showing (the Pixel's). Kept apart from the settings, whose changes rebuild Home.
+     */
+    private val closeState = activity.getSharedPreferences("close_state", android.content.Context.MODE_PRIVATE)
+    private var contractSeen = closeState.getBoolean(KEY_CONTRACT_SEEN, false)
+    /** Home was stopped behind an app with a close zoom armed, and the system hasn't finished putting it back. */
+    private var homeCovered = false
+    /** The close zoom is held until Home is on screen again (see [playReturnAnimation]). */
+    private var returnWaiting = false
+    private val returnWaitCap = Runnable { homeShown("wait cap") }
+
+    private fun homeShown(source: String) {
+        homeCovered = false
+        if (!returnWaiting) return
+        returnWaiting = false
+        root.removeCallbacks(returnWaitCap)
+        AnimLog.log("Home shown ($source): return animation")
+        playReturnAnimation(shown = true)
+    }
+
     /** Until when the system may still be drawing a close into Home (cleared early by [closeFinished]). */
     private var closingUntil = 0L
     private var pendingLaunch: (() -> Unit)? = null
@@ -1415,6 +1439,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         AnimLog.log("close finished ($source) heldLaunch=${pendingLaunch != null}")
         closingUntil = 0L
         root.removeCallbacks(launchFallback)
+        if (source != "wait cap") homeShown("enter complete")
         val start = pendingLaunch ?: return
         pendingLaunch = null
         start()
@@ -1687,6 +1712,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // Opened straight after a close: the landing icon's surface doesn't scale with Home, and the ripple is stale.
         finishContract()
         returnRipple?.let { root.removeCallbacks(it); returnRipple = null }
+        // a close still waiting for Home to show is overtaken by this open
+        returnWaiting = false
+        root.removeCallbacks(returnWaitCap)
         zoom()
         lastWidgetLaunch = null
         pendingReturnAnim = true
@@ -1786,6 +1814,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             wallpaper.setZoom(1f)
             // Launchii's live wallpaper waits, out of sight, at the open zoom, so every close zooms it back
             if (com.oneuiclone.home.ui.LiveWallpaper.drives) com.oneuiclone.home.ui.LiveWallpaper.park(wallpaperOpenZoom)
+            homeCovered = true
         }
     }
 
@@ -1880,10 +1909,23 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * app's, for returns without a gesture contract.
      */
     private fun playReturnAnimation(landing: CloseTarget? = lastLaunchedApp?.let { closeTargetFor(it.key.component, it.user) }
-        ?: lastWidgetLaunch?.let { widgetTarget(it) }) {
+        ?: lastWidgetLaunch?.let { widgetTarget(it) }, shown: Boolean = false) {
         if (!pendingReturnAnim) return
+        if (homeCovered && !contractSeen) {
+            // No gesture contract on this phone (Redmi A5, Android Go): its close shows only the wallpaper and puts
+            // Home back after it, 0.3–0.6 s after the window is gone, so a zoom started now was over before Home
+            // showed (it popped in at rest). Home waits, out of sight, at the open scale and grows once it's back.
+            if (!returnWaiting) {
+                returnWaiting = true
+                root.removeCallbacks(returnWaitCap)
+                root.postDelayed(returnWaitCap, RETURN_WAIT_MS)
+                AnimLog.log("return animation waits for Home to show")
+            }
+            return
+        }
         pendingReturnAnim = false
-        markClosing("return animation")
+        // once Home is back the system's close is over: a tap now needn't be held for it
+        if (!shown) markClosing("return animation")
         AnimLog.log("return animation to ${(landing?.view as? com.oneuiclone.home.ui.WidgetContainer)?.let { "widget " + it.item.provider.packageName } ?: landing?.view?.contentDescription ?: "screen centre"}")
         // The folder is still open only if Home was never stopped (a translucent app); it un-zooms in place.
         animateContentScale(if (folders.isOpen) overlay else homeLayer, 1f, 450, Easing.APP_CLOSE_POSITION)
@@ -1944,6 +1986,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val contract = GestureNavContract.fromIntent(intent)
         if (contract != null) {
             android.util.Log.i("OneUiHome", "gesture contract for " + contract.componentName)
+            if (!contractSeen) {
+                contractSeen = true
+                closeState.edit().putBoolean(KEY_CONTRACT_SEEN, true).apply()
+            }
             playReturnAnimation(handleContract(contract))
         } else {
             playReturnAnimation()
