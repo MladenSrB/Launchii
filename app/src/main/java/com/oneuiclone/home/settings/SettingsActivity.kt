@@ -108,7 +108,8 @@ class SettingsActivity : OneUiPage() {
                 prefs.swipeUpSearch = it
                 if (it) downSearch.isChecked = false
             }.switch()
-            val openStyles = listOf(Prefs.OPEN_SMOOTH to "Smooth", Prefs.OPEN_ZOOM_IN to "Zoom In", Prefs.OPEN_AURA to "Aura")
+            val openStyles = listOf(Prefs.OPEN_SMOOTH to "Smooth", Prefs.OPEN_ZOOM_IN to "Zoom In", Prefs.OPEN_AURA to "Aura",
+                Prefs.OPEN_SHUTTER to "Shutter", Prefs.OPEN_ORBIT to "Orbit", Prefs.OPEN_ANTICIPATE to "Anticipate", Prefs.OPEN_SCAN to "Scan", Prefs.OPEN_MIST to "Mist")
             item("App opening animation", openStyles.first { it.first == prefs.openAnimation }.second) {
                 AlertDialog.Builder(this@SettingsActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle("App opening animation")

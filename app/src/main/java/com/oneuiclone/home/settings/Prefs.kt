@@ -76,16 +76,31 @@ class Prefs(context: Context) {
 
     /**
      * App opening animation: [OPEN_ZOOM_IN] (the icon grows into a card, iOS-style; the default), [OPEN_SMOOTH] (Home
-     * shrinks) or [OPEN_AURA] (a glow in the icon's colours on Launchii's live wallpaper; Zoom In without it).
+     * shrinks), or one drawn by Launchii's live wallpaper ([openEffect]: Aura, Shutter, Orbit, Anticipate, Scan, Mist;
+     * Zoom In without it).
      */
     var openAnimation: String get() = sp.getString("open_animation", OPEN_ZOOM_IN) ?: OPEN_ZOOM_IN; set(v) = sp.edit().putString("open_animation", v).apply()
     val zoomInOpen: Boolean get() = openAnimation == OPEN_ZOOM_IN
-    val auraOpen: Boolean get() = openAnimation == OPEN_AURA
+    val openEffect: com.oneuiclone.home.ui.LiveWallpaper.Kind? get() = when (openAnimation) {
+        OPEN_AURA -> com.oneuiclone.home.ui.LiveWallpaper.Kind.AURA
+        OPEN_SHUTTER -> com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER
+        OPEN_ORBIT -> com.oneuiclone.home.ui.LiveWallpaper.Kind.ORBIT
+        OPEN_ANTICIPATE -> com.oneuiclone.home.ui.LiveWallpaper.Kind.ANTICIPATE
+        OPEN_SCAN -> com.oneuiclone.home.ui.LiveWallpaper.Kind.SCAN
+        OPEN_MIST -> com.oneuiclone.home.ui.LiveWallpaper.Kind.MIST
+        else -> null
+    }
+    val wallpaperOpen: Boolean get() = openEffect != null
 
     companion object {
         const val OPEN_SMOOTH = "smooth"
         const val OPEN_ZOOM_IN = "zoom_in"
         const val OPEN_AURA = "aura"
+        const val OPEN_SHUTTER = "shutter"
+        const val OPEN_ORBIT = "orbit"
+        const val OPEN_ANTICIPATE = "anticipate"
+        const val OPEN_SCAN = "scan"
+        const val OPEN_MIST = "mist"
 
         /** Keys applied live by the launcher (no view rebuild when only these change). */
         fun isLive(key: String) = key.startsWith("home_blur") || key == "open_animation"

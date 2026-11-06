@@ -72,12 +72,18 @@ private const val ZOOM_IN_SCALE = 1.15f
  */
 private const val ZOOM_IN_CARD_SCALE = 1.2f
 /**
- * Aura open (0.177): the live wallpaper's glow and Home's fade, from the 2026-11-06 mockup. Home shrinks as in Smooth
- * and fades out over 80–300 ms; the wallpaper zooms to the open zoom over the glow's 420 ms.
+ * Opens drawn by the live wallpaper (Aura 0.177; Shutter, Orbit, Anticipate, Scan, Mist 0.178), from the 2026-11-06
+ * mockups: Home moves and fades out over them as [effectHome] says. Aura's wallpaper zooms to the open zoom over its
+ * glow's 420 ms.
  */
 private const val AURA_MS = 420L
-private const val AURA_HOME_FADE_DELAY_MS = 80L
-private const val AURA_HOME_FADE_MS = 220L
+/** Anticipate: Home bulges to 1.04 over the wind-up, then flies back to 0.8. */
+private val ANTICIPATE_HOME = android.view.animation.Interpolator { t ->
+    val m = t * 410f
+    val wind = 1f - (1f - (m / 110f).coerceIn(0f, 1f)).let { it * it * it }
+    val go = Easing.STANDARD.getInterpolation(((m - 110f) / 300f).coerceIn(0f, 1f))
+    (1f - (1f + 0.04f * wind + (0.8f - 1.04f) * go)) / 0.2f
+}
 /**
  * The card goes when the app covers Home (onStop). Translucent apps never do and get Smooth instead; this only
  * catches anything else that leaves Home showing. Slow starts can stop Home seconds after the start.
@@ -452,7 +458,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     override fun onAppsChanged(apps: List<AppInfo>) {
         searchSources.refresh()                        // first run: suggestions ready before search first opens
-        if (prefs.zoomInOpen || prefs.auraOpen) splashLook.prefetch(apps.map { it.activityInfo })
+        if (prefs.zoomInOpen || prefs.wallpaperOpen) splashLook.prefetch(apps.map { it.activityInfo })
         val m = model ?: return
         if (!bound && m.items.isEmpty()) {
             if (!m.load()) { m.createDefault(dp.homeCols, dp.homeRows); firstRun = true }
@@ -1466,22 +1472,22 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // Zoom In needs an app icon or a widget to grow from (search contacts open with Smooth), and an app that
         // covers Home: a translucent one would leave the card showing behind it
         val look = when {
-            !prefs.zoomInOpen && !prefs.auraOpen -> null
+            !prefs.zoomInOpen && !prefs.wallpaperOpen -> null
             icon != null && app != null -> timedLook(app)
             widget != null && widgetApp != null -> widgetLook(widgetApp).also {
                 AnimLog.log("zoom in: widget card colour #%06X from %s".format(it.color and 0xFFFFFF, it.source))
             }
             else -> null
         }
-        // Aura is drawn by Launchii's live wallpaper; with another wallpaper it's Zoom In
-        val aura = prefs.auraOpen && look != null && !look.translucent && com.oneuiclone.home.ui.LiveWallpaper.drives
-        val zoomIn = look != null && !look.translucent && !aura
+        // Aura, Shutter, Orbit… are drawn by Launchii's live wallpaper; with another wallpaper they're Zoom In
+        val effect = if (look != null && !look.translucent && com.oneuiclone.home.ui.LiveWallpaper.drives) prefs.openEffect else null
+        val zoomIn = look != null && !look.translucent && effect == null
         AnimLog.log("tap $label " + (if (hold) "during close (window ${closingFor}ms left) -> hold" else "-> start now") +
-            if (aura) " (aura)" else if (zoomIn) " (zoom in)" else "")
+            if (effect != null) " ($effect)" else if (zoomIn) " (zoom in)" else "")
         launched(app) {
-            // a held Zoom In or Aura launch just waits with its card or glow up, like a slow app
-            if (aura && icon != null) auraOpen(icon, app!!)
-            else if (aura) auraOpenFromWidget(widget!!, widgetApp!!)
+            // a held Zoom In or wallpaper-drawn launch just waits with its card or effect up, like a slow app
+            if (effect != null && icon != null) effectOpen(icon, app!!, effect, look!!.color)
+            else if (effect != null) effectOpenFromWidget(widget!!, widgetApp!!, effect, look!!.color)
             else if (zoomIn && icon != null) zoomIn(icon, app!!, look!!.color)
             else if (zoomIn) zoomInFromWidget(widget!!, widgetApp!!, look!!.color)
             else zoomOpen(if (hold) OPEN_HOLD_SCALE else OPEN_SCALE, if (hold) LAUNCH_WAIT_MS else OPEN_ZOOM_MS)
@@ -1490,10 +1496,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val go = {
             try {
                 AnimLog.log("start $label after ${android.os.SystemClock.uptimeMillis() - tapAt}ms")
-                if (hold && !zoomIn && !aura) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS)
+                if (hold && !zoomIn && effect == null) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS)
                 start()
                 if (launchCard != null) { root.removeCallbacks(cardTimeout); root.postDelayed(cardTimeout, CARD_TIMEOUT_MS) }
-                if (auraContent != null) { root.removeCallbacks(auraTimeout); root.postDelayed(auraTimeout, CARD_TIMEOUT_MS) }
+                if (effectContent != null) { root.removeCallbacks(effectTimeout); root.postDelayed(effectTimeout, CARD_TIMEOUT_MS) }
             } catch (e: Exception) {
                 AnimLog.log("start $label failed: $e")
                 Toast.makeText(activity, failure, Toast.LENGTH_SHORT).show()
@@ -1521,7 +1527,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 val now = android.os.SystemClock.uptimeMillis()
                 maxGap = maxOf(maxGap, now - prev); prev = now
                 sb.append(' ').append(now - t0).append(':').append("%.2f".format(openContent().scaleX)).append(if (folders.isOpen) "F" else "")
-                auraContent?.let { sb.append("/a %.2f".format(it.alpha)) }
+                effectContent?.let { sb.append("/a %.2f".format(it.alpha)) }
                 launchCard?.let { sb.append("/card %.2f".format(it.progress)) }
                 if (now - t0 < 800) android.view.Choreographer.getInstance().postFrameCallback(this)
                 else AnimLog.log("$sb | longest frame gap ${maxGap}ms")
@@ -1699,60 +1705,119 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         applyTextMode()
     }
 
-    /** The layer an Aura open faded out (given back its opacity once the app covers it), or null. */
-    private var auraContent: View? = null
-    private val auraTimeout = Runnable {
-        AnimLog.log("aura: Home still not covered ${CARD_TIMEOUT_MS}ms after the start, Home brought back")
-        endAura(animate = true)
+    /** The layer a wallpaper-drawn open faded out (given back its opacity once the app covers it), or null. */
+    private var effectContent: View? = null
+    /** Shutter's tapped icon, hidden while the wallpaper's copy of it slides to the middle. */
+    private var effectIcon: IconView? = null
+    /** Whether the status and navigation bars go dark-on-light over the effect (Shutter on a light splash). */
+    private var effectBarsLight = false
+    private val effectTimeout = Runnable {
+        AnimLog.log("open effect: Home still not covered ${CARD_TIMEOUT_MS}ms after the start, Home brought back")
+        endEffect(animate = true)
+    }
+    private val effectBars = Runnable { if (effectContent != null) setLightBars(effectBarsLight) }
+
+    /** How Home goes for a wallpaper-drawn open: shrinks to [scale] over [scaleMs], fades out over [fadeMs] from [fadeDelay]. */
+    private class EffectHome(val scale: Float, val scaleMs: Long, val curve: android.view.animation.Interpolator,
+                             val fadeDelay: Long, val fadeMs: Long)
+
+    private fun effectHome(kind: com.oneuiclone.home.ui.LiveWallpaper.Kind) = when (kind) {
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.AURA -> EffectHome(OPEN_SCALE, OPEN_ZOOM_MS, Easing.CUBIC_OUT, 80, 220)
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER -> EffectHome(0.97f, 300, Easing.STANDARD, 60, 200)
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.ORBIT -> EffectHome(0.88f, 320, Easing.STANDARD, 80, 220)
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.ANTICIPATE -> EffectHome(0.8f, 410, ANTICIPATE_HOME, 140, 200)
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.SCAN -> EffectHome(0.96f, 300, Easing.STANDARD, 80, 220)
+        com.oneuiclone.home.ui.LiveWallpaper.Kind.MIST -> EffectHome(0.95f, 320, Easing.STANDARD, 100, 220)
     }
 
-    private fun auraOpen(v: IconView, app: AppInfo) {
+    private fun effectOpen(v: IconView, app: AppInfo, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int) {
         val r = Rect()
         v.iconBoundsOnScreen(r)
-        auraOpen(r, v.icon ?: app.drawerIcon)
+        effectOpen(r, v.icon ?: app.drawerIcon, kind, splash, app, v)
     }
 
-    /** Aura from a widget: the glow rises from the widget's middle, in the colours of the app that owns it. */
-    private fun auraOpenFromWidget(widget: View, app: AppInfo) {
+    /** From a widget: the effect starts at the widget's middle, in the colours of the app that owns it. */
+    private fun effectOpenFromWidget(widget: View, app: AppInfo, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int) {
         val loc = IntArray(2)
         widget.getLocationOnScreen(loc)
         val cx = loc[0] + widget.width * homeLayer.scaleX / 2f
         val cy = loc[1] + widget.height * homeLayer.scaleY / 2f
         val half = dp.iconSizePx / 2
-        auraOpen(Rect((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt()), app.drawerIcon)
+        effectOpen(Rect((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt()), app.drawerIcon, kind, splash, app, null)
     }
 
     /**
-     * Aura open (0.177): Launchii's live wallpaper blurs and darkens while a glow in the icon's colours rises from
-     * [from] (screen coordinates) to the middle of the screen and breathes; Home shrinks as in Smooth and fades
-     * out over it. The wallpaper draws the glow on its own thread, and Android never fades the wallpaper during an
-     * open, so the app grows out of it whenever it's ready. Home gets its opacity back in onStop, out of sight.
+     * An open drawn by Launchii's live wallpaper ([kind]: Aura, Shutter, Orbit, Anticipate, Scan, Mist), starting at
+     * [from] (screen coordinates); Home moves and fades out over it. The wallpaper draws on its own thread, and
+     * Android never fades the wallpaper during an open, so the app grows out of it whenever it's ready. Home gets its
+     * opacity (and Shutter's icon) back in onStop, out of sight.
      */
-    private fun auraOpen(from: Rect, icon: android.graphics.Bitmap) {
+    private fun effectOpen(from: Rect, icon: android.graphics.Bitmap, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int,
+                           app: AppInfo, v: IconView?) {
         dropLaunchCard(fade = false)
         val content = openContent()
-        com.oneuiclone.home.ui.LiveWallpaper.startAura(com.oneuiclone.home.ui.LiveWallpaper.Aura(icon,
-            from.exactCenterX(), from.exactCenterY(), from.width().toFloat(), android.os.SystemClock.uptimeMillis()))
-        AnimLog.log("aura: from ${from.toShortString()}")
-        animateContentScale(content, OPEN_SCALE, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
-        animateWallpaperZoom(wallpaperOpenZoom, AURA_MS, Easing.STANDARD)
+        val e = com.oneuiclone.home.ui.LiveWallpaper.OpenEffect(kind, icon, from.exactCenterX(), from.exactCenterY(),
+            from.width().toFloat(), android.os.SystemClock.uptimeMillis(), splash)
+        com.oneuiclone.home.ui.LiveWallpaper.startEffect(e)
+        AnimLog.log("open effect $kind: from ${from.toShortString()}")
+        val hm = effectHome(kind)
+        animateContentScale(content, hm.scale, hm.scaleMs, hm.curve)
+        if (kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.AURA) animateWallpaperZoom(wallpaperOpenZoom, AURA_MS, Easing.STANDARD)
         content.animate().cancel()
-        content.animate().alpha(0f).setStartDelay(AURA_HOME_FADE_DELAY_MS).setDuration(AURA_HOME_FADE_MS)
+        content.animate().alpha(0f).setStartDelay(hm.fadeDelay).setDuration(hm.fadeMs)
             .setInterpolator(android.view.animation.LinearInterpolator()).start()
-        auraContent = content
-        // the wallpaper goes dark under the bars
-        root.postDelayed(auraBars, AURA_MS / 3)
+        effectContent = content
+        if (kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER) {
+            // the wallpaper's copy of the icon slides to the middle, then becomes the full icon in its splash circle
+            v?.iconVisible = false
+            effectIcon = v
+            val loadAt = android.os.SystemClock.uptimeMillis()
+            splashLook.loadIcon(app.activityInfo) { d ->
+                AnimLog.log("open effect: full icon after ${android.os.SystemClock.uptimeMillis() - loadAt}ms")
+                if (com.oneuiclone.home.ui.LiveWallpaper.effect === e) {
+                    e.splashIcon = splashCircle(d)
+                    e.splashIconAt = android.os.SystemClock.uptimeMillis()
+                }
+            }
+        }
+        // the bars over the effect: light on the dark ones, Shutter's after its splash colour
+        effectBarsLight = kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER && android.graphics.Color.luminance(splash) > 0.5f
+        root.removeCallbacks(effectBars)
+        root.postDelayed(effectBars, if (kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER) 250L else AURA_MS / 3)
     }
 
-    private val auraBars = Runnable { if (auraContent != null) setLightBars(false) }
+    /**
+     * [d] at the splash's 160 dp, in a circle: an adaptive icon's layers without the system mask (they reach a
+     * quarter of the size past each side, as in [com.oneuiclone.home.ui.LaunchCard]).
+     */
+    private fun splashCircle(d: android.graphics.drawable.Drawable): android.graphics.Bitmap {
+        val px = (160f * activity.resources.displayMetrics.density).toInt()
+        val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        if (d is android.graphics.drawable.AdaptiveIconDrawable) {
+            val out = px / 4
+            val bounds = Rect(-out, -out, px + out, px + out)
+            d.background?.let { it.bounds = bounds; it.draw(c) }
+            d.foreground?.let { it.bounds = bounds; it.draw(c) }
+        } else {
+            d.setBounds(0, 0, px, px)
+            d.draw(c)
+        }
+        c.drawCircle(px / 2f, px / 2f, px / 2f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+        })
+        return bmp
+    }
 
-    /** Gives the faded layer its opacity back (faded in when Home is showing) and lets the glow go. */
-    private fun endAura(animate: Boolean) {
-        root.removeCallbacks(auraTimeout)
-        com.oneuiclone.home.ui.LiveWallpaper.endAura()
-        root.removeCallbacks(auraBars)
-        val content = auraContent ?: return
-        auraContent = null
+    /** Gives the faded layer its opacity back (faded in when Home is showing) and lets the effect go. */
+    private fun endEffect(animate: Boolean) {
+        root.removeCallbacks(effectTimeout)
+        com.oneuiclone.home.ui.LiveWallpaper.endEffect()
+        root.removeCallbacks(effectBars)
+        effectIcon?.iconVisible = true
+        effectIcon = null
+        val content = effectContent ?: return
+        effectContent = null
         applyTextMode()
         content.animate().cancel()
         if (animate) content.animate().alpha(1f).setStartDelay(0).setDuration(OPEN_ZOOM_MS).start()
@@ -1772,7 +1837,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         pendingReturnAnim = false
         lastLaunchedApp = null
         dropLaunchCard(fade = true)
-        endAura(animate = true)
+        endEffect(animate = true)
         animateContentScale(openContent(), 1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
         animateWallpaperZoom(1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
     }
@@ -1862,8 +1927,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(launchFallback)
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
         dropLaunchCard(fade = false)
-        // Home is out of sight: its layer is opaque again for the close (the wallpaper drops the glow once hidden)
-        auraContent?.let { root.removeCallbacks(auraTimeout); root.removeCallbacks(auraBars); it.animate().cancel(); it.alpha = 1f; auraContent = null; applyTextMode() }
+        // Home is out of sight: its layer is opaque again for the close (the wallpaper drops its effect once hidden)
+        effectIcon?.let { it.iconVisible = true; effectIcon = null }
+        effectContent?.let { root.removeCallbacks(effectTimeout); root.removeCallbacks(effectBars); it.animate().cancel(); it.alpha = 1f; effectContent = null; applyTextMode() }
         // Left for an app Home didn't open (Recents, a quick switch, a notification): the way back zooms in all the same.
         // Not for the screen going off, so unlocking doesn't play a close.
         if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake() &&
@@ -1934,8 +2000,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         AppUpdate.checkIfDue()
         // back before the app covered Home (a translucent app, or one that closed at once)
         dropLaunchCard(fade = true)
-        endAura(animate = true)
-        if (prefs.zoomInOpen || prefs.auraOpen) repo?.let { r -> splashLook.prefetch(r.apps.map { it.activityInfo }) }
+        endEffect(animate = true)
+        if (prefs.zoomInOpen || prefs.wallpaperOpen) repo?.let { r -> splashLook.prefetch(r.apps.map { it.activityInfo }) }
         centerWallpaper()
         BadgeService.addListener(badgeListener)
         updateBadges()

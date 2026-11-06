@@ -54,32 +54,38 @@ object LiveWallpaper {
         engines.forEach { it.requestDraw() }
     }
 
+    /** The opening animations the wallpaper draws (2026-11-06 mockups): Aura (0.177), then Shutter, Orbit, Anticipate, Scan and Mist (0.178). */
+    enum class Kind { AURA, SHUTTER, ORBIT, ANTICIPATE, SCAN, MIST }
+
     /**
-     * The Aura open (0.177), drawn over the picture from the tap until the app covers the wallpaper: the picture
-     * blurs and darkens, and a glow in the tapped icon's colours rises from it to the middle of the screen, then
-     * breathes. Android fades Home's window during an open but never the wallpaper's, so it lasts through the
-     * system's part of the open. [icon]: the tapped icon (any config); [fromX]/[fromY]/[fromSize]: its centre and
-     * width on screen; [startAt]: the tap (uptime).
+     * An opening animation drawn over the picture from the tap until the app covers the wallpaper. Android fades
+     * Home's window during an open but never the wallpaper's, so it lasts through the system's part of the open.
+     * [icon]: the tapped icon (any config); [fromX]/[fromY]/[fromSize]: its centre and width on screen; [startAt]:
+     * the tap (uptime); [splash]: the app's splash colour (Shutter).
      */
-    class Aura(val icon: Bitmap, val fromX: Float, val fromY: Float, val fromSize: Float, val startAt: Long) {
+    class OpenEffect(val kind: Kind, val icon: Bitmap, val fromX: Float, val fromY: Float, val fromSize: Float,
+                     val startAt: Long, val splash: Int = Color.WHITE) {
         /** Uptime its fade-out began, or 0 while it's up. */
         @Volatile var endAt = 0L
+        /** Shutter: the full icon in its splash circle, once loaded (otherwise the Home icon grows). */
+        @Volatile var splashIcon: Bitmap? = null
+        @Volatile var splashIconAt = 0L
     }
 
-    /** The Aura being drawn, or null. */
-    @Volatile var aura: Aura? = null; internal set
+    /** The effect being drawn, or null. */
+    @Volatile var effect: OpenEffect? = null; internal set
 
     /** Main thread: starts [a] on the wallpaper (replacing any other). */
-    fun startAura(a: Aura) {
-        aura = a
-        engines.forEach { it.animateAura() }
+    fun startEffect(a: OpenEffect) {
+        effect = a
+        engines.forEach { it.animateEffect() }
     }
 
-    /** Fades the Aura out (Home came back before an app covered it, or the launch failed). */
-    fun endAura() {
-        val a = aura ?: return
+    /** Fades the effect out (Home came back before an app covered it, or the launch failed). */
+    fun endEffect() {
+        val a = effect ?: return
         if (a.endAt == 0L) a.endAt = android.os.SystemClock.uptimeMillis()
-        engines.forEach { it.animateAura() }
+        engines.forEach { it.animateEffect() }
     }
 
     /** The picture changed (a new wallpaper, or Blur wallpaper): any thread. */
@@ -94,11 +100,11 @@ object LiveWallpaper {
     internal fun detach(e: LiveWallpaperService.ZoomEngine) { engines -= e }
     internal fun visibilityChanged() {
         if (engines.none { it.visible }) {
-            // the app covers the wallpaper: the Aura is over, and the close finds the plain picture
+            // the app covers the wallpaper: the effect is over, and the close finds the plain picture
             // (redrawn now, out of sight: a visible wallpaper first shows the last frame it posted)
-            aura?.let {
-                aura = null
-                com.oneuiclone.home.debug.AnimLog.log("aura: wallpaper hidden, dropped")
+            effect?.let {
+                effect = null
+                com.oneuiclone.home.debug.AnimLog.log("open effect ${it.kind}: wallpaper hidden, dropped")
                 engines.forEach { e -> e.requestDraw() }
             }
             parked?.let { parked = null; apply(it) }
@@ -139,12 +145,13 @@ object LiveWallpaper {
     }
 }
 
-/** Aura: the glow and blur come in over [AURA_MS] (Material emphasized decelerate), as in the 2026-11-06 mockup. */
-private const val AURA_MS = 420f
+/** The opening effects' curve (Material emphasized decelerate), as in the 2026-11-06 mockups. */
 private val AURA_CURVE = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
-/** Fade back to the plain picture when Home returns uncovered, and the longest an uncovered Aura stays up. */
-private const val AURA_FADE_MS = 250L
-private const val AURA_MAX_MS = 8000L
+/** Fade back to the plain picture when Home returns uncovered, and the longest an uncovered effect stays up. */
+private const val EFFECT_FADE_MS = 250L
+private const val EFFECT_MAX_MS = 8000L
+/** Aura: the glow and blur come in over [AURA_MS]. */
+private const val AURA_MS = 420f
 /** The picture's blur (sigma, as a fraction of the screen width) and darkening at full strength. */
 private const val AURA_BLUR = 10f / 300f
 private const val AURA_DIM = 0.5f
@@ -155,13 +162,48 @@ private const val AURA_GLOW_ALPHA = 0.95f
 /** Once up, the glow breathes ±5 % every 1.1 s while the app is still starting. */
 private const val AURA_BREATH = 0.05f
 private const val AURA_BREATH_MS = 1100f
+/** Shutter (mockups 4, #1): slats roll down over [SHUTTER_SLAT_MS], each row [SHUTTER_STAGGER_MS] after the one nearer the icon. */
+private const val SHUTTER_SLATS = 14
+private const val SHUTTER_SLAT_MS = 220f
+private const val SHUTTER_STAGGER_MS = 28f
+private const val SHUTTER_ICON_DELAY_MS = 100f
+private const val SHUTTER_ICON_MS = 420f
+private const val SPLASH_ICON_SWAP_MS = 120f
+/** Orbit (#2): 6 lights, ring radius in mockup px (300 px wide), one turn every [ORBIT_TURN_MS]. */
+private const val ORBIT_DOTS = 6
+private const val ORBIT_MS = 420f
+private const val ORBIT_OPEN_MS = 300f
+private const val ORBIT_RADIUS = 58f
+private const val ORBIT_TURN_MS = 900f
+private const val ORBIT_BLUR = 8f
+private const val ORBIT_DIM = 0.45f
+/** Anticipate (#5): back to [ANTICIPATE_WIND] over the wind-up, then forward to [ANTICIPATE_LUNGE]. */
+private const val ANTICIPATE_WIND_MS = 110f
+private const val ANTICIPATE_GO_MS = 320f
+private const val ANTICIPATE_WIND = 0.97f
+private const val ANTICIPATE_LUNGE = 1.12f
+private const val ANTICIPATE_DIM = 0.25f
+/** Scan (#6): the lines reach the edges over [SCAN_MS]; then one sweeps the screen every [SCAN_SWEEP_MS]. */
+private const val SCAN_MS = 450f
+private const val SCAN_SWEEP_MS = 2400f
+private const val SCAN_BRIGHTNESS = 0.5f
+private const val SCAN_SATURATION = 1.4f
+private const val SCAN_TINT = 0.15f
+/** Mist (#10): clouds roll in over [MIST_MS] over a slightly blurred picture. */
+private const val MIST_MS = 520f
+private const val MIST_BLUR = 6f
+private const val MIST_DIM = 0.1f
+private class Cloud(val angle: Float, val size: Float, val near: Float, val phase: Float)
+private val MIST_CLOUDS = java.util.Random(23).let { r ->
+    List(8) { i -> Cloud(i / 8f * 2f * Math.PI.toFloat() + r.nextFloat() * 0.5f, 200f + r.nextFloat() * 120f, 40f + r.nextFloat() * 90f, r.nextFloat() * 6f) }
+}
 private const val GLOW_SAMPLES = 12
 private const val GLOW_PX = 96
 private const val GLOW_SATURATION = 1.3f
 /** From this blur (px), the picture is blurred at 1/[BLUR_DOWNSCALE] of the screen's size. */
 private const val BLUR_SMALL_FROM = 8f
 private const val BLUR_DOWNSCALE = 4f
-/** Builds Aura glows off the drawing thread, so the Aura starts on its first frame. */
+/** Builds Aura glows and effect colours off the drawing thread, so an effect starts on its first frame. */
 private val glowWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "AuraGlow") }
 
 class LiveWallpaperService : WallpaperService() {
@@ -259,7 +301,7 @@ class LiveWallpaperService : WallpaperService() {
             if (!isPreview) try { unregisterReceiver(unlocked) } catch (_: Exception) {}
             LiveWallpaper.detach(this)
             synchronized(lock) { surfaceReady = false }
-            handler.post { choreographer?.removeFrameCallback(auraFrame) }
+            handler.post { choreographer?.removeFrameCallback(effectFrame) }
             thread.quitSafely()
             super.onDestroy()
         }
@@ -267,15 +309,15 @@ class LiveWallpaperService : WallpaperService() {
         /** Main thread: draws the current zoom on the next turn of the drawing thread (coalesced). */
         fun requestDraw() {
             if (!isPreview) drawZoom = LiveWallpaper.zoom
-            // the Aura's frame loop draws every frame, with this zoom
-            if (auraDrawing != null && LiveWallpaper.aura != null) return
+            // the effect's frame loop draws every frame, with this zoom
+            if (effectDrawing != null && LiveWallpaper.effect != null) return
             if (pending.compareAndSet(false, true)) handler.post { pending.set(false); draw() }
         }
 
         private fun draw() {
             val locked = isLocked()
             val b = (if (locked) lockBitmap else null) ?: bitmap ?: return
-            val aura = if (locked || isPreview) null else LiveWallpaper.aura
+            val effect = if (locked || isPreview) null else LiveWallpaper.effect
             synchronized(lock) {
                 if (!surfaceReady) return
                 val holder = surfaceHolder
@@ -291,105 +333,312 @@ class LiveWallpaperService : WallpaperService() {
                     matrix.postTranslate((w - b.width * fit) / 2f, (h - b.height * fit) / 2f)
                     matrix.postScale(z, z, w / 2f, h / 2f)
                     c.drawColor(Color.BLACK)
-                    if (aura == null) c.drawBitmap(b, matrix, paint) else drawAura(c, b, aura, w, h)
+                    if (effect == null) c.drawBitmap(b, matrix, paint) else drawEffect(c, b, effect, w, h)
                 } finally {
                     holder.unlockCanvasAndPost(c)
                 }
             }
         }
 
-        // ---- Aura (drawing thread, except [auraDrawing]) ----
-        private val auraNode = android.graphics.RenderNode("aura")
-        private val glowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-        private val glowRect = android.graphics.RectF()
-        /** Built on [glowWorker] for [glowFor]; drawn once it's there. */
+        // ---- Opening effects (drawing thread, except [effectDrawing]) ----
+        private val blurNode = android.graphics.RenderNode("open-effect")
+        private val fxPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        private val scanPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            // Scan's band: half as bright, a little richer
+            colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply {
+                setSaturation(SCAN_SATURATION)
+                postConcat(android.graphics.ColorMatrix().apply { setScale(SCAN_BRIGHTNESS, SCAN_BRIGHTNESS, SCAN_BRIGHTNESS, 1f) })
+            })
+        }
+        private val fxRect = android.graphics.RectF()
+        private val splashPx = 160f * resources.displayMetrics.density
+        /** Built on [glowWorker] for [glowFor]: Aura's glow, and the icon's colours (Orbit, Scan, Mist). */
         @Volatile private var glow: Bitmap? = null
-        @Volatile private var glowFor: LiveWallpaper.Aura? = null
+        @Volatile private var palette: IntArray? = null
+        @Volatile private var glowFor: LiveWallpaper.OpenEffect? = null
+        /** A soft white disc for Orbit's glows and Mist's clouds, made once. */
+        private var disc: Bitmap? = null
         private var choreographer: android.view.Choreographer? = null
-        /** The Aura the frame loop is running for (read on the main thread too). */
-        @Volatile private var auraDrawing: LiveWallpaper.Aura? = null
-        private var auraFrames = 0
-        private var auraLast = 0L
-        private var auraGap = 0L
-        private var auraSlowest = 0L
-        private val auraFrame = android.view.Choreographer.FrameCallback { stepAura() }
+        /** The effect the frame loop is running for (read on the main thread too). */
+        @Volatile private var effectDrawing: LiveWallpaper.OpenEffect? = null
+        private var effectFrames = 0
+        private var effectLast = 0L
+        private var effectGap = 0L
+        private var effectSlowest = 0L
+        private val effectFrame = android.view.Choreographer.FrameCallback { stepEffect() }
 
-        /** Any thread: runs the Aura's frame loop until it ends or the wallpaper hides; its glow joins once built. */
-        fun animateAura() {
+        /** Any thread: runs the effect's frame loop until it ends or the wallpaper hides; its colours join once built. */
+        fun animateEffect() {
             if (isPreview) return
             handler.post {
-                val a = LiveWallpaper.aura ?: return@post
+                val a = LiveWallpaper.effect ?: return@post
                 if (glowFor !== a) {
                     glowFor = a
-                    glow = null
+                    glow = null; palette = null
                     glowWorker.execute {
                         val t0 = System.nanoTime()
-                        val g = try { buildGlow(a.icon) } catch (e: Exception) { null }
-                        if (glowFor === a) glow = g
-                        com.oneuiclone.home.debug.AnimLog.log("aura: glow %s in %.1fms".format(if (g == null) "failed" else "built", (System.nanoTime() - t0) / 1e6))
+                        val g = if (a.kind == LiveWallpaper.Kind.AURA) try { buildGlow(a.icon) } catch (e: Exception) { null } else null
+                        val pal = try { buildPalette(a.icon) } catch (e: Exception) { null }
+                        if (glowFor === a) { glow = g; palette = pal }
+                        com.oneuiclone.home.debug.AnimLog.log("open effect %s: colours %s in %.1fms".format(a.kind,
+                            pal?.joinToString { "#%06X".format(it and 0xFFFFFF) } ?: "failed", (System.nanoTime() - t0) / 1e6))
                     }
                 }
-                if (auraDrawing !== a) { auraDrawing = a; auraFrames = 0; auraLast = 0L; auraGap = 0L; auraSlowest = 0L }
+                if (effectDrawing !== a) { effectDrawing = a; effectFrames = 0; effectLast = 0L; effectGap = 0L; effectSlowest = 0L }
                 val ch = choreographer ?: android.view.Choreographer.getInstance().also { choreographer = it }
-                ch.removeFrameCallback(auraFrame)
-                ch.postFrameCallback(auraFrame)
+                ch.removeFrameCallback(effectFrame)
+                ch.postFrameCallback(effectFrame)
             }
         }
 
-        private fun stepAura() {
-            val a = auraDrawing
+        private fun stepEffect() {
+            val a = effectDrawing
             val now = android.os.SystemClock.uptimeMillis()
-            if (a != null && LiveWallpaper.aura === a) {
+            if (a != null && LiveWallpaper.effect === a) {
                 // never covered (an app that shows the wallpaper): let it go
-                if (a.endAt == 0L && now - a.startAt > AURA_MAX_MS) a.endAt = now
-                if (a.endAt != 0L && now - a.endAt >= AURA_FADE_MS) LiveWallpaper.aura = null
+                if (a.endAt == 0L && now - a.startAt > EFFECT_MAX_MS) a.endAt = now
+                if (a.endAt != 0L && now - a.endAt >= EFFECT_FADE_MS) LiveWallpaper.effect = null
             }
-            if (auraLast != 0L) auraGap = max(auraGap, now - auraLast)
-            auraLast = now
-            auraFrames++
+            if (effectLast != 0L) effectGap = max(effectGap, now - effectLast)
+            effectLast = now
+            effectFrames++
             draw()
-            auraSlowest = max(auraSlowest, android.os.SystemClock.uptimeMillis() - now)
-            if (a != null && LiveWallpaper.aura === a) { choreographer?.postFrameCallback(auraFrame); return }
-            if (a != null) com.oneuiclone.home.debug.AnimLog.log("aura: $auraFrames frames over ${now - a.startAt}ms, longest gap ${auraGap}ms, slowest draw ${auraSlowest}ms" +
-                if (a.endAt != 0L) ", faded out" else "")
-            auraDrawing = null
-            glow = null; glowFor = null
+            effectSlowest = max(effectSlowest, android.os.SystemClock.uptimeMillis() - now)
+            if (a != null && LiveWallpaper.effect === a) { choreographer?.postFrameCallback(effectFrame); return }
+            if (a != null) com.oneuiclone.home.debug.AnimLog.log("open effect ${a.kind}: $effectFrames frames over ${now - a.startAt}ms, " +
+                "longest gap ${effectGap}ms, slowest draw ${effectSlowest}ms" + if (a.endAt != 0L) ", faded out" else "")
+            effectDrawing = null
+            glow = null; palette = null; glowFor = null
         }
 
         /**
-         * The picture blurred and darkened by the Aura's strength, then the glow rising from the icon to the middle
-         * of the screen. A fade-out ([LiveWallpaper.Aura.endAt]) takes all of it back to the plain picture.
+         * One frame of [a]. A fade-out ([LiveWallpaper.OpenEffect.endAt]) draws the plain picture and the effect's
+         * frame over it, more see-through each frame. Distances follow the mockups, drawn on a 300 px wide phone.
          */
-        private fun drawAura(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.Aura, w: Float, h: Float) {
+        private fun drawEffect(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, w: Float, h: Float) {
             val now = android.os.SystemClock.uptimeMillis()
             val m = (now - a.startAt).toFloat()
-            val p = AURA_CURVE.getInterpolation((m / AURA_MS).coerceIn(0f, 1f))
-            val out = if (a.endAt == 0L) 1f else 1f - ((now - a.endAt) / AURA_FADE_MS.toFloat()).coerceIn(0f, 1f)
-            val k = p * out
-            val sigma = AURA_BLUR * w * k
+            val out = if (a.endAt == 0L) 1f else 1f - ((now - a.endAt) / EFFECT_FADE_MS.toFloat()).coerceIn(0f, 1f)
+            if (out < 1f) {
+                c.drawBitmap(b, matrix, paint)
+                if (out <= 0f) return
+                c.saveLayerAlpha(0f, 0f, w, h, (out * 255).toInt())
+            }
+            val u = w / 300f
+            when (a.kind) {
+                LiveWallpaper.Kind.AURA -> drawAura(c, b, a, m, w, h)
+                LiveWallpaper.Kind.SHUTTER -> drawShutter(c, b, a, m, w, h, now)
+                LiveWallpaper.Kind.ORBIT -> drawOrbit(c, b, a, m, w, h, u)
+                LiveWallpaper.Kind.ANTICIPATE -> drawAnticipate(c, b, m, w, h)
+                LiveWallpaper.Kind.SCAN -> drawScan(c, b, a, m, w, h, u)
+                LiveWallpaper.Kind.MIST -> drawMist(c, b, m, w, h, u)
+            }
+            if (out < 1f) c.restore()
+        }
+
+        /** The picture, blurred by [sigma] px (at a quarter of the size once it's big: a blur hides it) and darkened by [dim]. */
+        private fun drawPicture(c: android.graphics.Canvas, b: Bitmap, w: Float, h: Float, sigma: Float, dim: Float) {
             if (sigma < 0.5f) c.drawBitmap(b, matrix, paint)
             else {
-                // blurred at a quarter of the size (a blur hides it), then drawn back up to the screen
                 val d = if (sigma >= BLUR_SMALL_FROM) BLUR_DOWNSCALE else 1f
-                auraNode.setPosition(0, 0, kotlin.math.ceil(w / d).toInt(), kotlin.math.ceil(h / d).toInt())
-                auraNode.pivotX = 0f; auraNode.pivotY = 0f
-                auraNode.scaleX = d; auraNode.scaleY = d
-                val rc = auraNode.beginRecording()
+                blurNode.setPosition(0, 0, kotlin.math.ceil(w / d).toInt(), kotlin.math.ceil(h / d).toInt())
+                blurNode.pivotX = 0f; blurNode.pivotY = 0f
+                blurNode.scaleX = d; blurNode.scaleY = d
+                val rc = blurNode.beginRecording()
                 rc.scale(1f / d, 1f / d)
                 rc.drawBitmap(b, matrix, paint)
-                auraNode.endRecording()
-                auraNode.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(sigma / d, sigma / d, android.graphics.Shader.TileMode.CLAMP))
-                c.drawRenderNode(auraNode)
+                blurNode.endRecording()
+                blurNode.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(sigma / d, sigma / d, android.graphics.Shader.TileMode.CLAMP))
+                c.drawRenderNode(blurNode)
             }
-            c.drawColor(Color.argb(AURA_DIM * k, 0f, 0f, 0f))
+            if (dim > 0.001f) c.drawColor(Color.argb(dim, 0f, 0f, 0f))
+        }
+
+        /** Aura: the picture blurs and darkens, and the glow rises from the icon to the middle of the screen, then breathes. */
+        private fun drawAura(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, m: Float, w: Float, h: Float) {
+            val p = ease(m, AURA_MS)
+            drawPicture(c, b, w, h, AURA_BLUR * w * p, AURA_DIM * p)
             val g = glow ?: return
             val breath = if (m > AURA_MS) 1f + AURA_BREATH * kotlin.math.sin((m - AURA_MS) / AURA_BREATH_MS * 2f * Math.PI.toFloat()) else 1f
             val size = (a.fromSize + (AURA_GLOW * w - a.fromSize) * p) * breath
             val cx = a.fromX + (w / 2f - a.fromX) * p
             val cy = a.fromY + (h * AURA_GLOW_Y - a.fromY) * p
-            glowPaint.alpha = (255f * (p * 1.4f).coerceAtMost(1f) * AURA_GLOW_ALPHA * out).toInt()
-            glowRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
-            c.drawBitmap(g, null, glowRect, glowPaint)
+            fxPaint.colorFilter = null
+            fxPaint.alpha = (255f * (p * 1.4f).coerceAtMost(1f) * AURA_GLOW_ALPHA).toInt()
+            fxRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+            c.drawBitmap(g, null, fxRect, fxPaint)
+        }
+
+        /**
+         * Shutter: slats in the splash colour roll down, first on the icon's row and then outward, and the icon slides
+         * to the middle at splash size, so the screen ends as the app's splash.
+         */
+        private fun drawShutter(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, m: Float, w: Float, h: Float, now: Long) {
+            c.drawBitmap(b, matrix, paint)
+            val rowH = h / SHUTTER_SLATS
+            val row = (a.fromY / rowH).toInt().coerceIn(0, SHUTTER_SLATS - 1)
+            fxPaint.colorFilter = null
+            fxPaint.color = a.splash
+            for (i in 0 until SHUTTER_SLATS) {
+                val p = ease(m - kotlin.math.abs(i - row) * SHUTTER_STAGGER_MS, SHUTTER_SLAT_MS)
+                if (p > 0f) c.drawRect(0f, i * rowH, w, i * rowH + (rowH + 1f) * p, fxPaint)
+            }
+            val ip = ease(m - SHUTTER_ICON_DELAY_MS, SHUTTER_ICON_MS)
+            val size = a.fromSize + (splashPx - a.fromSize) * ip
+            val cx = a.fromX + (w / 2f - a.fromX) * ip
+            val cy = a.fromY + (h / 2f - a.fromY) * ip
+            fxRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+            // the Home icon until the full one has loaded, then a quick crossfade into it
+            val big = a.splashIcon
+            val bigAlpha = if (big == null) 0f else ((now - a.splashIconAt) / SPLASH_ICON_SWAP_MS).coerceIn(0f, 1f)
+            fxPaint.alpha = ((1f - bigAlpha) * 255).toInt()
+            if (fxPaint.alpha > 0) c.drawBitmap(a.icon, null, fxRect, fxPaint)
+            if (big != null) { fxPaint.alpha = (bigAlpha * 255).toInt(); c.drawBitmap(big, null, fxRect, fxPaint) }
+            fxPaint.alpha = 255
+        }
+
+        /** Orbit: lights in the icon's colours orbit a point that glides from the icon to the middle of a dark, blurred picture. */
+        private fun drawOrbit(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, m: Float, w: Float, h: Float, u: Float) {
+            val p = ease(m, ORBIT_MS)
+            drawPicture(c, b, w, h, ORBIT_BLUR * u * p, ORBIT_DIM * p)
+            val r = ORBIT_RADIUS * u * ease(m, ORBIT_OPEN_MS)
+            val cx = a.fromX + (w / 2f - a.fromX) * p
+            val cy = a.fromY + (h / 2f - a.fromY) * p
+            val turn = m / ORBIT_TURN_MS * 2f * Math.PI.toFloat()
+            val cols = palette ?: intArrayOf(Color.WHITE)
+            val shown = (m / 80f).coerceIn(0f, 1f)
+            val glowDisc = disc()
+            for (i in 0 until ORBIT_DOTS) {
+                val ang = turn + i.toFloat() / ORBIT_DOTS * 2f * Math.PI.toFloat()
+                val size = (8f + 4f * kotlin.math.sin(turn * 0.5f + i)) * u
+                val x = cx + kotlin.math.cos(ang) * r
+                val y = cy + kotlin.math.sin(ang) * r
+                val g = size + 28f * u
+                fxRect.set(x - g / 2f, y - g / 2f, x + g / 2f, y + g / 2f)
+                fxPaint.colorFilter = android.graphics.PorterDuffColorFilter(withAlpha(cols[i % cols.size], 0.85f * shown), android.graphics.PorterDuff.Mode.SRC_IN)
+                fxPaint.alpha = 255
+                c.drawBitmap(glowDisc, null, fxRect, fxPaint)
+                fxPaint.colorFilter = null
+                fxPaint.color = withAlpha(Color.WHITE, shown)
+                c.drawCircle(x, y, size / 2f, fxPaint)
+            }
+            fxPaint.alpha = 255
+        }
+
+        /**
+         * Anticipate: the picture pulls back a little, then lunges toward you and darkens, then breathes. Never zoomed
+         * out past the screen's edges.
+         */
+        private fun drawAnticipate(c: android.graphics.Canvas, b: Bitmap, m: Float, w: Float, h: Float) {
+            val wind = 1f - (1f - (m / ANTICIPATE_WIND_MS).coerceIn(0f, 1f)).let { it * it * it }
+            val go = ease(m - ANTICIPATE_WIND_MS, ANTICIPATE_GO_MS)
+            val breath = if (m > 450f) 1f + 0.015f * kotlin.math.sin((m - 450f) / 1200f * 2f * Math.PI.toFloat()) else 1f
+            val z = max(((1f + (ANTICIPATE_WIND - 1f) * wind) + (ANTICIPATE_LUNGE - ANTICIPATE_WIND) * go) * breath, 1f / (baseScale * drawZoom))
+            c.save()
+            c.scale(z, z, w / 2f, h / 2f)
+            c.drawBitmap(b, matrix, paint)
+            c.restore()
+            if (go > 0f) c.drawColor(Color.argb(ANTICIPATE_DIM * go, 0f, 0f, 0f))
+        }
+
+        /**
+         * Scan: two glowing lines split from the icon's row to the edges, and the band between them goes darker and
+         * richer, tinted with the icon's colour; then one line glides up and down.
+         */
+        private fun drawScan(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, m: Float, w: Float, h: Float, u: Float) {
+            c.drawBitmap(b, matrix, paint)
+            val p = ease(m, SCAN_MS)
+            val top = a.fromY + (-4f * u - a.fromY) * p
+            val bot = a.fromY + (h + 4f * u - a.fromY) * p
+            val tint = palette?.firstOrNull() ?: Color.WHITE
+            if (bot - top > 0.5f) {
+                c.save()
+                c.clipRect(0f, top, w, bot)
+                c.drawBitmap(b, matrix, scanPaint)
+                c.drawColor(withAlpha(tint, SCAN_TINT))
+                c.restore()
+            }
+            if (p < 0.98f) { scanLine(c, top, w, u, tint, 1f); scanLine(c, bot, w, u, tint, 1f) }
+            if (m > SCAN_MS + 30f) {
+                val y = h / 2f - kotlin.math.cos((m - SCAN_MS - 30f) / SCAN_SWEEP_MS * 2f * Math.PI.toFloat()) * (h / 2f - 40f * u)
+                scanLine(c, y, w, u, tint, 0.6f)
+            }
+        }
+
+        private fun scanLine(c: android.graphics.Canvas, y: Float, w: Float, u: Float, tint: Int, alpha: Float) {
+            fxPaint.colorFilter = null
+            fxPaint.shader = android.graphics.LinearGradient(0f, y - 14f * u, 0f, y + 14f * u,
+                intArrayOf(Color.TRANSPARENT, withAlpha(tint, 0.9f * alpha), Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
+            c.drawRect(0f, y - 14f * u, w, y + 14f * u, fxPaint)
+            fxPaint.shader = null
+            fxPaint.color = withAlpha(Color.WHITE, alpha)
+            c.drawRect(0f, y - u, w, y + u, fxPaint)
+        }
+
+        /** Mist: soft clouds, white and in the icon's colour, roll in from the edges toward the middle and drift. */
+        private fun drawMist(c: android.graphics.Canvas, b: Bitmap, m: Float, w: Float, h: Float, u: Float) {
+            val p = ease(m, MIST_MS)
+            drawPicture(c, b, w, h, MIST_BLUR * u * p, MIST_DIM * p)
+            val tint = palette?.firstOrNull() ?: Color.WHITE
+            val cloud = disc()
+            val shown = (p * 1.5f).coerceAtMost(1f)
+            MIST_CLOUDS.forEachIndexed { i, k ->
+                val d = (520f + (k.near - 520f) * p) * u
+                val drift = 12f * u * kotlin.math.sin(m / 2000f * 2f * Math.PI.toFloat() + k.phase)
+                val x = w / 2f + kotlin.math.cos(k.angle) * d + drift
+                val y = h / 2f + kotlin.math.sin(k.angle) * d * 1.6f
+                val size = (k.size + 60f) * u
+                val col = if (i % 2 == 1) withAlpha(Color.WHITE, 0.6f * shown) else withAlpha(tint, 0.5f * shown)
+                fxPaint.colorFilter = android.graphics.PorterDuffColorFilter(col, android.graphics.PorterDuff.Mode.SRC_IN)
+                fxRect.set(x - size / 2f, y - size / 2f, x + size / 2f, y + size / 2f)
+                c.drawBitmap(cloud, null, fxRect, fxPaint)
+            }
+            fxPaint.colorFilter = null
+        }
+
+        private fun ease(m: Float, d: Float) = AURA_CURVE.getInterpolation((m / d).coerceIn(0f, 1f))
+        private fun withAlpha(c: Int, a: Float) = Color.argb((Color.alpha(c) * a.coerceIn(0f, 1f)).toInt(), Color.red(c), Color.green(c), Color.blue(c))
+
+        /** A soft white disc, opaque in the middle and gone at the rim. */
+        private fun disc(): Bitmap = disc ?: run {
+            val s = 128
+            val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            p.shader = android.graphics.RadialGradient(s / 2f, s / 2f, s / 2f, intArrayOf(Color.WHITE, 0x99FFFFFF.toInt(), 0x33FFFFFF, 0x00FFFFFF),
+                floatArrayOf(0f, 0.35f, 0.7f, 1f), android.graphics.Shader.TileMode.CLAMP)
+            android.graphics.Canvas(bmp).drawCircle(s / 2f, s / 2f, s / 2f, p)
+            (bmp.copy(Bitmap.Config.HARDWARE, false) ?: bmp).also { disc = it }
+        }
+
+        /**
+         * Up to three of [icon]'s colours, most common first: its colourful pixels grouped by hue (12 groups) and
+         * brightened so they glow on a dark screen. A grey icon gives its lightest colour, or white.
+         */
+        private fun buildPalette(icon: Bitmap): IntArray {
+            val soft = if (icon.config == Bitmap.Config.HARDWARE) icon.copy(Bitmap.Config.ARGB_8888, false) else icon
+            val n = 16
+            val px = IntArray(n * n)
+            Bitmap.createScaledBitmap(soft, n, n, true).getPixels(px, 0, n, 0, 0, n, n)
+            val count = IntArray(12); val sr = FloatArray(12); val sg = FloatArray(12); val sb = FloatArray(12)
+            var lightest = Color.WHITE; var lightLum = -1f
+            val hsv = FloatArray(3)
+            for (col in px) {
+                if (Color.alpha(col) < 128) continue
+                val r = Color.red(col) / 255f; val g = Color.green(col) / 255f; val bl = Color.blue(col) / 255f
+                val lum = 0.2126f * r + 0.7152f * g + 0.0722f * bl
+                if (lum > lightLum) { lightLum = lum; lightest = col }
+                if (maxOf(r, g, bl) - minOf(r, g, bl) < 0.25f) continue
+                Color.colorToHSV(col, hsv)
+                val k = ((hsv[0] / 30f).toInt()).coerceIn(0, 11)
+                count[k]++; sr[k] += r; sg[k] += g; sb[k] += bl
+            }
+            val top = (0 until 12).filter { count[it] >= 2 }.sortedByDescending { count[it] }.take(3)
+            if (top.isEmpty()) return intArrayOf(lightest or 0xFF000000.toInt())
+            return top.map { k ->
+                Color.colorToHSV(Color.rgb(sr[k] / count[k], sg[k] / count[k], sb[k] / count[k]), hsv)
+                hsv[2] = maxOf(hsv[2], 0.85f)
+                Color.HSVToColor(hsv)
+            }.toIntArray()
         }
 
         /**
