@@ -72,6 +72,13 @@ private const val ZOOM_IN_SCALE = 1.15f
  */
 private const val ZOOM_IN_CARD_SCALE = 1.2f
 /**
+ * Aura open (0.177): the live wallpaper's glow and Home's fade, from the 2026-11-06 mockup. Home shrinks as in Smooth
+ * and fades out over 80–300 ms; the wallpaper zooms to the open zoom over the glow's 420 ms.
+ */
+private const val AURA_MS = 420L
+private const val AURA_HOME_FADE_DELAY_MS = 80L
+private const val AURA_HOME_FADE_MS = 220L
+/**
  * The card goes when the app covers Home (onStop). Translucent apps never do and get Smooth instead; this only
  * catches anything else that leaves Home showing. Slow starts can stop Home seconds after the start.
  */
@@ -445,7 +452,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     override fun onAppsChanged(apps: List<AppInfo>) {
         searchSources.refresh()                        // first run: suggestions ready before search first opens
-        if (prefs.zoomInOpen) splashLook.prefetch(apps.map { it.activityInfo })
+        if (prefs.zoomInOpen || prefs.auraOpen) splashLook.prefetch(apps.map { it.activityInfo })
         val m = model ?: return
         if (!bound && m.items.isEmpty()) {
             if (!m.load()) { m.createDefault(dp.homeCols, dp.homeRows); firstRun = true }
@@ -1459,18 +1466,23 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // Zoom In needs an app icon or a widget to grow from (search contacts open with Smooth), and an app that
         // covers Home: a translucent one would leave the card showing behind it
         val look = when {
-            !prefs.zoomInOpen -> null
+            !prefs.zoomInOpen && !prefs.auraOpen -> null
             icon != null && app != null -> timedLook(app)
             widget != null && widgetApp != null -> widgetLook(widgetApp).also {
                 AnimLog.log("zoom in: widget card colour #%06X from %s".format(it.color and 0xFFFFFF, it.source))
             }
             else -> null
         }
-        val zoomIn = look != null && !look.translucent
-        AnimLog.log("tap $label " + (if (hold) "during close (window ${closingFor}ms left) -> hold" else "-> start now") + if (zoomIn) " (zoom in)" else "")
+        // Aura is drawn by Launchii's live wallpaper; with another wallpaper it's Zoom In
+        val aura = prefs.auraOpen && look != null && !look.translucent && com.oneuiclone.home.ui.LiveWallpaper.drives
+        val zoomIn = look != null && !look.translucent && !aura
+        AnimLog.log("tap $label " + (if (hold) "during close (window ${closingFor}ms left) -> hold" else "-> start now") +
+            if (aura) " (aura)" else if (zoomIn) " (zoom in)" else "")
         launched(app) {
-            // a held Zoom In launch just waits with its card up, like a slow app
-            if (zoomIn && icon != null) zoomIn(icon, app!!, look!!.color)
+            // a held Zoom In or Aura launch just waits with its card or glow up, like a slow app
+            if (aura && icon != null) auraOpen(icon, app!!)
+            else if (aura) auraOpenFromWidget(widget!!, widgetApp!!)
+            else if (zoomIn && icon != null) zoomIn(icon, app!!, look!!.color)
             else if (zoomIn) zoomInFromWidget(widget!!, widgetApp!!, look!!.color)
             else zoomOpen(if (hold) OPEN_HOLD_SCALE else OPEN_SCALE, if (hold) LAUNCH_WAIT_MS else OPEN_ZOOM_MS)
         }
@@ -1478,9 +1490,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val go = {
             try {
                 AnimLog.log("start $label after ${android.os.SystemClock.uptimeMillis() - tapAt}ms")
-                if (hold && !zoomIn) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS)
+                if (hold && !zoomIn && !aura) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS)
                 start()
                 if (launchCard != null) { root.removeCallbacks(cardTimeout); root.postDelayed(cardTimeout, CARD_TIMEOUT_MS) }
+                if (auraContent != null) { root.removeCallbacks(auraTimeout); root.postDelayed(auraTimeout, CARD_TIMEOUT_MS) }
             } catch (e: Exception) {
                 AnimLog.log("start $label failed: $e")
                 Toast.makeText(activity, failure, Toast.LENGTH_SHORT).show()
@@ -1508,6 +1521,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 val now = android.os.SystemClock.uptimeMillis()
                 maxGap = maxOf(maxGap, now - prev); prev = now
                 sb.append(' ').append(now - t0).append(':').append("%.2f".format(openContent().scaleX)).append(if (folders.isOpen) "F" else "")
+                auraContent?.let { sb.append("/a %.2f".format(it.alpha)) }
                 launchCard?.let { sb.append("/card %.2f".format(it.progress)) }
                 if (now - t0 < 800) android.view.Choreographer.getInstance().postFrameCallback(this)
                 else AnimLog.log("$sb | longest frame gap ${maxGap}ms")
@@ -1685,6 +1699,66 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         applyTextMode()
     }
 
+    /** The layer an Aura open faded out (given back its opacity once the app covers it), or null. */
+    private var auraContent: View? = null
+    private val auraTimeout = Runnable {
+        AnimLog.log("aura: Home still not covered ${CARD_TIMEOUT_MS}ms after the start, Home brought back")
+        endAura(animate = true)
+    }
+
+    private fun auraOpen(v: IconView, app: AppInfo) {
+        val r = Rect()
+        v.iconBoundsOnScreen(r)
+        auraOpen(r, v.icon ?: app.drawerIcon)
+    }
+
+    /** Aura from a widget: the glow rises from the widget's middle, in the colours of the app that owns it. */
+    private fun auraOpenFromWidget(widget: View, app: AppInfo) {
+        val loc = IntArray(2)
+        widget.getLocationOnScreen(loc)
+        val cx = loc[0] + widget.width * homeLayer.scaleX / 2f
+        val cy = loc[1] + widget.height * homeLayer.scaleY / 2f
+        val half = dp.iconSizePx / 2
+        auraOpen(Rect((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt()), app.drawerIcon)
+    }
+
+    /**
+     * Aura open (0.177): Launchii's live wallpaper blurs and darkens while a glow in the icon's colours rises from
+     * [from] (screen coordinates) to the middle of the screen and breathes; Home shrinks as in Smooth and fades
+     * out over it. The wallpaper draws the glow on its own thread, and Android never fades the wallpaper during an
+     * open, so the app grows out of it whenever it's ready. Home gets its opacity back in onStop, out of sight.
+     */
+    private fun auraOpen(from: Rect, icon: android.graphics.Bitmap) {
+        dropLaunchCard(fade = false)
+        val content = openContent()
+        com.oneuiclone.home.ui.LiveWallpaper.startAura(com.oneuiclone.home.ui.LiveWallpaper.Aura(icon,
+            from.exactCenterX(), from.exactCenterY(), from.width().toFloat(), android.os.SystemClock.uptimeMillis()))
+        AnimLog.log("aura: from ${from.toShortString()}")
+        animateContentScale(content, OPEN_SCALE, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
+        animateWallpaperZoom(wallpaperOpenZoom, AURA_MS, Easing.STANDARD)
+        content.animate().cancel()
+        content.animate().alpha(0f).setStartDelay(AURA_HOME_FADE_DELAY_MS).setDuration(AURA_HOME_FADE_MS)
+            .setInterpolator(android.view.animation.LinearInterpolator()).start()
+        auraContent = content
+        // the wallpaper goes dark under the bars
+        root.postDelayed(auraBars, AURA_MS / 3)
+    }
+
+    private val auraBars = Runnable { if (auraContent != null) setLightBars(false) }
+
+    /** Gives the faded layer its opacity back (faded in when Home is showing) and lets the glow go. */
+    private fun endAura(animate: Boolean) {
+        root.removeCallbacks(auraTimeout)
+        com.oneuiclone.home.ui.LiveWallpaper.endAura()
+        root.removeCallbacks(auraBars)
+        val content = auraContent ?: return
+        auraContent = null
+        applyTextMode()
+        content.animate().cancel()
+        if (animate) content.animate().alpha(1f).setStartDelay(0).setDuration(OPEN_ZOOM_MS).start()
+        else content.alpha = 1f
+    }
+
     /** Home content to [scale], the wallpaper zooming by the same fraction of the open zoom. */
     private fun zoomOpen(scale: Float, duration: Long) {
         val content = openContent()
@@ -1698,6 +1772,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         pendingReturnAnim = false
         lastLaunchedApp = null
         dropLaunchCard(fade = true)
+        endAura(animate = true)
         animateContentScale(openContent(), 1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
         animateWallpaperZoom(1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
     }
@@ -1787,6 +1862,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(launchFallback)
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
         dropLaunchCard(fade = false)
+        // Home is out of sight: its layer is opaque again for the close (the wallpaper drops the glow once hidden)
+        auraContent?.let { root.removeCallbacks(auraTimeout); root.removeCallbacks(auraBars); it.animate().cancel(); it.alpha = 1f; auraContent = null; applyTextMode() }
         // Left for an app Home didn't open (Recents, a quick switch, a notification): the way back zooms in all the same.
         // Not for the screen going off, so unlocking doesn't play a close.
         if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake() &&
@@ -1857,7 +1934,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         AppUpdate.checkIfDue()
         // back before the app covered Home (a translucent app, or one that closed at once)
         dropLaunchCard(fade = true)
-        if (prefs.zoomInOpen) repo?.let { r -> splashLook.prefetch(r.apps.map { it.activityInfo }) }
+        endAura(animate = true)
+        if (prefs.zoomInOpen || prefs.auraOpen) repo?.let { r -> splashLook.prefetch(r.apps.map { it.activityInfo }) }
         centerWallpaper()
         BadgeService.addListener(badgeListener)
         updateBadges()
@@ -2267,8 +2345,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                     // Just below the dock icons and down, swiping up belongs to the system's home / recents gesture
                     if (state.state == StateController.State.HOME && dy < 0 && downY >= swipeUpDeadLine()) return false
                     if (state.state == StateController.State.HOME && dy < 0) {
-                        if (prefs.swipeUpSearch) { openSearch(fromHome = true); consumed = true } else startTracking(true)
+                        if (prefs.swipeUpSearch && !prefs.swipeDownSearch) { openSearch(fromHome = true); consumed = true } else startTracking(true)
                         return true
+                    }
+                    if (state.state == StateController.State.HOME && dy > 0 && prefs.swipeDownSearch) {
+                        openSearch(fromHome = true, fromAbove = true); consumed = true; return true
                     }
                     if (state.state == StateController.State.HOME && dy > 0 && prefs.swipeDownNotifications) {
                         expandNotifications(); consumed = true; return true
@@ -2351,8 +2432,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     /**
      * The bar grows out of the pill that was tapped. From Home, the screen crossfades to the Apps screen's
      * blurred background in step with the bar (whose grid stays hidden): Home → search in one motion.
+     * [fromAbove]: opened by a swipe down, so the results come down into place instead of rising.
      */
-    private fun openSearch(fromHome: Boolean = false) {
+    private fun openSearch(fromHome: Boolean = false, fromAbove: Boolean = false) {
         if (search != null) return
         if (fromHome && (state.state != StateController.State.HOME || state.isTransitioning || edit.isActive ||
                 folders.isOpen || drag.isDragging || popup != null)) return
@@ -2372,7 +2454,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             },
             canSwipeHome = { !drag.isDragging && popup == null && dragArmed == null },
             onSwipeHome = { closeSearch(toHome = true) },
-            onSwipeUp = { searchToApps() },
+            // with Swipe down for search a swipe up undoes it (the Apps screen is a swipe up from Home)
+            onSwipeUp = { if (prefs.swipeDownSearch) closeSearch(lift = true) else searchToApps() },
             onDismiss = { closeSearch() },
         ) {
             // the bar has landed exactly on its pill: swap them in the same frame
@@ -2397,7 +2480,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             appsScroll.animate().alpha(0f).setDuration(200).start()
         }
         s.requestApplyInsets()
-        s.open(origin)
+        s.open(origin, fromAbove)
     }
 
     fun onContactsPermission(granted: Boolean) { search?.onContactsPermission(granted) }
@@ -2416,19 +2499,20 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /**
      * [toHome]: the bar shrinks back into the Home screen Search button while the Apps screen gives way to
-     * Home; otherwise it returns to the apps-screen pill and the grid fades back in.
+     * Home; otherwise it returns to the apps-screen pill and the grid fades back in. [lift]: closed by a swipe up,
+     * so the results rise away as they fade.
      */
-    private fun closeSearch(toHome: Boolean = searchFromHome) {
+    private fun closeSearch(toHome: Boolean = searchFromHome, lift: Boolean = false) {
         val s = search ?: return
         if (!s.isOpen) return
         if (toHome) {
-            s.close(homeSearchOrigin())
+            s.close(homeSearchOrigin(), lift)
             if (state.state == StateController.State.APPS || state.isTransitioning)
                 state.goTo(StateController.State.HOME, com.oneuiclone.home.ui.AppsSearch.MORPH_MS)
         } else {
             appsScroll.animate().alpha(1f).setDuration(200).start()
             moreButton.animate().alpha(1f).setDuration(150).start()
-            s.close(drawerSearchOrigin())
+            s.close(drawerSearchOrigin(), lift)
         }
     }
 

@@ -23,6 +23,11 @@ class Prefs(context: Context) {
     /** Search sends what you type to Google for suggestions; off keeps search entirely on the device. */
     var webSuggestions: Boolean get() = sp.getBoolean("web_suggestions", true); set(v) = sp.edit().putBoolean("web_suggestions", v).apply()
     var swipeUpSearch: Boolean get() = sp.getBoolean("swipe_up_search", false); set(v) = sp.edit().putBoolean("swipe_up_search", v).apply()
+    /**
+     * Swiping down on Home opens search instead of the notification panel, and swiping up always opens the Apps
+     * screen (overrides [swipeDownNotifications] and [swipeUpSearch]); off by default.
+     */
+    var swipeDownSearch: Boolean get() = sp.getBoolean("swipe_down_search", false); set(v) = sp.edit().putBoolean("swipe_down_search", v).apply()
     var lockLayout: Boolean get() = sp.getBoolean("lock_layout", false); set(v) = sp.edit().putBoolean("lock_layout", v).apply()
     var addNewApps: Boolean get() = sp.getBoolean("add_new_apps", false); set(v) = sp.edit().putBoolean("add_new_apps", v).apply()
     var themedIcons: Boolean get() = sp.getBoolean("themed_icons", false); set(v) = sp.edit().putBoolean("themed_icons", v).apply()
@@ -69,13 +74,18 @@ class Prefs(context: Context) {
     /** 0..1 of the full blur, 0 when off. */
     val homeBlurLevel: Float get() = if (homeBlur) homeBlurAmount / 100f else 0f
 
-    /** App opening animation: [OPEN_ZOOM_IN] (the icon grows into a card, iOS-style; the default) or [OPEN_SMOOTH] (Home shrinks). */
+    /**
+     * App opening animation: [OPEN_ZOOM_IN] (the icon grows into a card, iOS-style; the default), [OPEN_SMOOTH] (Home
+     * shrinks) or [OPEN_AURA] (a glow in the icon's colours on Launchii's live wallpaper; Zoom In without it).
+     */
     var openAnimation: String get() = sp.getString("open_animation", OPEN_ZOOM_IN) ?: OPEN_ZOOM_IN; set(v) = sp.edit().putString("open_animation", v).apply()
     val zoomInOpen: Boolean get() = openAnimation == OPEN_ZOOM_IN
+    val auraOpen: Boolean get() = openAnimation == OPEN_AURA
 
     companion object {
         const val OPEN_SMOOTH = "smooth"
         const val OPEN_ZOOM_IN = "zoom_in"
+        const val OPEN_AURA = "aura"
 
         /** Keys applied live by the launcher (no view rebuild when only these change). */
         fun isLive(key: String) = key.startsWith("home_blur") || key == "open_animation"

@@ -767,7 +767,8 @@ class AppsSearch(
     /** No keyboard came up (hardware keyboard, IME refused): settle at the bottom rather than float. */
     private val noKeyboard = Runnable { if (isOpen && ime == 0 && !imeAnimating) retargetKeyboard(0f) }
 
-    fun open(from: Origin) {
+    /** [fromAbove]: a swipe down opened it, so the results drop into place instead of rising (same fade, length and curve). */
+    fun open(from: Origin, fromAbove: Boolean = false) {
         sources.snapshot.let { scores = it.scores; suggested = it.contacts }
         origin = from
         isOpen = true
@@ -779,9 +780,9 @@ class AppsSearch(
         opening = true
         filter("")
         opening = false
-        // everything at once: a fade and a slide up, with the bar's morph
+        // everything at once: a fade and a slide (up, or down after a swipe down), with the bar's morph
         content.alpha = 0f
-        content.translationY = dp.dp(OPEN_RISE_DP)
+        content.translationY = dp.dp(OPEN_RISE_DP) * if (fromAbove) -1f else 1f
         content.animate().alpha(1f).translationY(0f).setDuration(OPEN_MS).setInterpolator(Easing.IME).start()
         animateTo(1f)
         field.isCursorVisible = true
@@ -822,9 +823,10 @@ class AppsSearch(
 
     /**
      * Morphs back into [to] (by default where it came from) while the keyboard goes down. Results stay in
-     * place: one of them may be mid-drag to the Home screen.
+     * place: one of them may be mid-drag to the Home screen. [lift]: a swipe up closed it, so they rise away as
+     * they fade (the drop-in after a swipe down, reversed).
      */
-    fun close(to: Origin = origin) {
+    fun close(to: Origin = origin, lift: Boolean = false) {
         if (!isOpen) return
         isOpen = false
         origin = to
@@ -835,7 +837,7 @@ class AppsSearch(
         net.shutdownNow()
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(field.windowToken, 0)
         field.isCursorVisible = false
-        content.animate().alpha(0f).setDuration(150).start()
+        content.animate().alpha(0f).translationY(if (lift) -dp.dp(OPEN_RISE_DP) else content.translationY).setDuration(150).start()
         // the query dissolves into the hint, so the pill lands showing "Search" like the one it becomes
         if (field.length() > 0) field.animate().alpha(0f).setDuration(110).withEndAction {
             field.text = null

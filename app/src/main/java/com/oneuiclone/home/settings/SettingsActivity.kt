@@ -17,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import com.oneuiclone.home.AppBubbles
 import com.oneuiclone.home.BadgeService
@@ -87,10 +88,27 @@ class SettingsActivity : OneUiPage() {
         card {
             toggle("Lock Home screen layout", "Prevent items on the Home screen from being removed or repositioned.", prefs.lockLayout) { prefs.lockLayout = it }
             toggle("Add new apps to Home screen", null, prefs.addNewApps) { prefs.addNewApps = it }
-            toggle("Swipe down for notification panel", "Open the notification panel by swiping down anywhere on the Home screen.", prefs.swipeDownNotifications) { prefs.swipeDownNotifications = it }
+            // Swipe down for search takes over both other swipes, so turning it on turns them off (and either of them, it)
+            lateinit var downNotif: Switch
+            lateinit var downSearch: Switch
+            lateinit var upSearch: Switch
+            downNotif = toggle("Swipe down for notification panel", "Open the notification panel by swiping down anywhere on the Home screen.",
+                prefs.swipeDownNotifications && !prefs.swipeDownSearch) {
+                prefs.swipeDownNotifications = it
+                if (it) downSearch.isChecked = false
+            }.switch()
+            downSearch = toggle("Swipe down for search", "Open search by swiping down anywhere on the Home screen. Swiping up always opens the Apps screen.",
+                prefs.swipeDownSearch) {
+                prefs.swipeDownSearch = it
+                if (it) { downNotif.isChecked = false; upSearch.isChecked = false }
+            }.switch()
             toggle("Web suggestions in search", "Show Google suggestions as you type. What you type is sent to Google.", prefs.webSuggestions) { prefs.webSuggestions = it }
-            toggle("Swipe up for search", "Open search instead of the Apps screen by swiping up on the Home screen.", prefs.swipeUpSearch) { prefs.swipeUpSearch = it }
-            val openStyles = listOf(Prefs.OPEN_SMOOTH to "Smooth", Prefs.OPEN_ZOOM_IN to "Zoom In")
+            upSearch = toggle("Swipe up for search", "Open search instead of the Apps screen by swiping up on the Home screen.",
+                prefs.swipeUpSearch && !prefs.swipeDownSearch) {
+                prefs.swipeUpSearch = it
+                if (it) downSearch.isChecked = false
+            }.switch()
+            val openStyles = listOf(Prefs.OPEN_SMOOTH to "Smooth", Prefs.OPEN_ZOOM_IN to "Zoom In", Prefs.OPEN_AURA to "Aura")
             item("App opening animation", openStyles.first { it.first == prefs.openAnimation }.second) {
                 AlertDialog.Builder(this@SettingsActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle("App opening animation")
@@ -187,6 +205,9 @@ class SettingsActivity : OneUiPage() {
             }
         }
     }
+
+    /** A [toggle] row's switch (its last child). */
+    private fun LinearLayout.switch() = getChildAt(childCount - 1) as Switch
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
