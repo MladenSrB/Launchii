@@ -1792,8 +1792,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      */
     private fun splashCircle(d: android.graphics.drawable.Drawable): android.graphics.Bitmap {
         val px = (160f * activity.resources.displayMetrics.density).toInt()
-        val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
-        val c = android.graphics.Canvas(bmp)
+        val full = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(full)
         if (d is android.graphics.drawable.AdaptiveIconDrawable) {
             val out = px / 4
             val bounds = Rect(-out, -out, px + out, px + out)
@@ -1803,8 +1803,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             d.setBounds(0, 0, px, px)
             d.draw(c)
         }
-        c.drawCircle(px / 2f, px / 2f, px / 2f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+        // drawn through the circle: a DST_IN circle only touches pixels inside it, which left the corners (0.178, 6696.mp4)
+        val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(bmp).drawCircle(px / 2f, px / 2f, px / 2f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.BitmapShader(full, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
         })
         return bmp
     }

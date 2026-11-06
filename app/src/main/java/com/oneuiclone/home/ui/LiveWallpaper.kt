@@ -186,9 +186,12 @@ private const val ANTICIPATE_DIM = 0.25f
 /** Scan (#6): the lines reach the edges over [SCAN_MS]; then one sweeps the screen every [SCAN_SWEEP_MS]. */
 private const val SCAN_MS = 450f
 private const val SCAN_SWEEP_MS = 2400f
-private const val SCAN_BRIGHTNESS = 0.5f
-private const val SCAN_SATURATION = 1.4f
-private const val SCAN_TINT = 0.15f
+/** The band is frosted glass (user, 2026-11-06): blur in mockup px, a white haze and the icon's colour over it. */
+private const val SCAN_FROST = 16f
+private const val SCAN_BRIGHTNESS = 0.85f
+private const val SCAN_SATURATION = 1.2f
+private const val SCAN_HAZE = 0.12f
+private const val SCAN_TINT = 0.12f
 /** Mist (#10): clouds roll in over [MIST_MS] over a slightly blurred picture. */
 private const val MIST_MS = 520f
 private const val MIST_BLUR = 6f
@@ -344,7 +347,7 @@ class LiveWallpaperService : WallpaperService() {
         private val blurNode = android.graphics.RenderNode("open-effect")
         private val fxPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
         private val scanPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-            // Scan's band: half as bright, a little richer
+            // Scan's frosted band: a little dimmer and richer under its haze
             colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply {
                 setSaturation(SCAN_SATURATION)
                 postConcat(android.graphics.ColorMatrix().apply { setScale(SCAN_BRIGHTNESS, SCAN_BRIGHTNESS, SCAN_BRIGHTNESS, 1f) })
@@ -436,9 +439,12 @@ class LiveWallpaperService : WallpaperService() {
             if (out < 1f) c.restore()
         }
 
-        /** The picture, blurred by [sigma] px (at a quarter of the size once it's big: a blur hides it) and darkened by [dim]. */
-        private fun drawPicture(c: android.graphics.Canvas, b: Bitmap, w: Float, h: Float, sigma: Float, dim: Float) {
-            if (sigma < 0.5f) c.drawBitmap(b, matrix, paint)
+        /**
+         * The picture, blurred by [sigma] px (at a quarter of the size once it's big: a blur hides it) and darkened by
+         * [dim]; [p] can add a colour filter.
+         */
+        private fun drawPicture(c: android.graphics.Canvas, b: Bitmap, w: Float, h: Float, sigma: Float, dim: Float, p: Paint = paint) {
+            if (sigma < 0.5f) c.drawBitmap(b, matrix, p)
             else {
                 val d = if (sigma >= BLUR_SMALL_FROM) BLUR_DOWNSCALE else 1f
                 blurNode.setPosition(0, 0, kotlin.math.ceil(w / d).toInt(), kotlin.math.ceil(h / d).toInt())
@@ -446,7 +452,7 @@ class LiveWallpaperService : WallpaperService() {
                 blurNode.scaleX = d; blurNode.scaleY = d
                 val rc = blurNode.beginRecording()
                 rc.scale(1f / d, 1f / d)
-                rc.drawBitmap(b, matrix, paint)
+                rc.drawBitmap(b, matrix, p)
                 blurNode.endRecording()
                 blurNode.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(sigma / d, sigma / d, android.graphics.Shader.TileMode.CLAMP))
                 c.drawRenderNode(blurNode)
@@ -542,8 +548,8 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         /**
-         * Scan: two glowing lines split from the icon's row to the edges, and the band between them goes darker and
-         * richer, tinted with the icon's colour; then one line glides up and down.
+         * Scan: two glowing lines split from the icon's row to the edges, and the band between them turns to frosted
+         * glass (blurred, under a light haze tinted with the icon's colour); then one line glides up and down.
          */
         private fun drawScan(c: android.graphics.Canvas, b: Bitmap, a: LiveWallpaper.OpenEffect, m: Float, w: Float, h: Float, u: Float) {
             c.drawBitmap(b, matrix, paint)
@@ -554,7 +560,8 @@ class LiveWallpaperService : WallpaperService() {
             if (bot - top > 0.5f) {
                 c.save()
                 c.clipRect(0f, top, w, bot)
-                c.drawBitmap(b, matrix, scanPaint)
+                drawPicture(c, b, w, h, SCAN_FROST * u, 0f, scanPaint)
+                c.drawColor(withAlpha(Color.WHITE, SCAN_HAZE))
                 c.drawColor(withAlpha(tint, SCAN_TINT))
                 c.restore()
             }
