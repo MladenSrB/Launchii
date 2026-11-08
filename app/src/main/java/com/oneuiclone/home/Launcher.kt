@@ -335,7 +335,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             val nr = AppRepository(activity, iconFactory, dp.iconSizePx).also {
                 it.themedIcons = prefs.themedIcons; it.themeAllApps = prefs.themeAllApps; it.plateAlpha = prefs.iconPlateAlpha
                 it.darkIcons = prefs.darkIcons; it.minimalIcons = prefs.minimalIcons; it.iconLook = prefs.iconLook; it.iconMode = prefs.iconMode
-                it.iconShape = prefs.iconShape
+                it.iconShape = prefs.iconShape; it.comicBorder = prefs.comicBorder
             }
             repo = nr
             model = WorkspaceModel(activity, nr)
@@ -345,9 +345,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             val themeChanged = r.themedIcons != prefs.themedIcons || r.themeAllApps != prefs.themeAllApps ||
                 r.plateAlpha != prefs.iconPlateAlpha || r.darkIcons != prefs.darkIcons ||
                 r.minimalIcons != prefs.minimalIcons || r.iconLook != prefs.iconLook || r.iconMode != prefs.iconMode ||
-                r.iconShape != prefs.iconShape
+                r.iconShape != prefs.iconShape || r.comicBorder != prefs.comicBorder
             r.themedIcons = prefs.themedIcons
             r.iconShape = prefs.iconShape
+            r.comicBorder = prefs.comicBorder
             r.iconLook = prefs.iconLook
             r.iconMode = prefs.iconMode
             r.darkIcons = prefs.darkIcons
@@ -2194,7 +2195,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 else -> (view as IconView).displayedIcon()
             } ?: return null
             val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
-            return { c -> c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), paint) }
+            if (view is FolderIconView) return { c -> c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), paint) }
+            val shaped = com.oneuiclone.home.icons.ShapedIcon()          // the Pixel 10's white corners (0.181)
+            return { c -> shaped.draw(c, bmp, Rect(0, 0, c.width, c.height), paint) }
         }
 
         fun setHidden(hidden: Boolean) {

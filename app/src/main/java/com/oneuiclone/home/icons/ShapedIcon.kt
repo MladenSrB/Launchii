@@ -51,3 +51,22 @@ class ShapedIcon {
         tmp.set(dst); draw(canvas, b, tmp, paint)
     }
 }
+
+/** An app icon for an ImageView, drawn through [ShapedIcon] (0.181). */
+class ShapedIconDrawable(private val b: Bitmap) : android.graphics.drawable.Drawable() {
+    private val shaped = ShapedIcon()
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val box = RectF()
+    override fun draw(canvas: Canvas) {
+        val r = bounds
+        val s = minOf(r.width(), r.height()).toFloat()
+        box.set(r.exactCenterX() - s / 2f, r.exactCenterY() - s / 2f, r.exactCenterX() + s / 2f, r.exactCenterY() + s / 2f)
+        shaped.draw(canvas, b, box, paint)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+    override fun getIntrinsicWidth() = b.width
+    override fun getIntrinsicHeight() = b.height
+}

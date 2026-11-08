@@ -757,7 +757,7 @@ class QuickOpenPanel(
     }
 
     private fun icon(app: AppInfo, sizeDp: Float) = ImageView(context).apply {
-        setImageBitmap(iconOf(app))
+        setImageDrawable(com.oneuiclone.home.icons.ShapedIconDrawable(iconOf(app)))
         layoutParams = LinearLayout.LayoutParams(dpi(sizeDp), dpi(sizeDp))
     }
 
@@ -951,7 +951,7 @@ class QuickOpenPanel(
             set(v) {
                 field = v
                 chipView.visibility = if (v == null) GONE else VISIBLE
-                if (v != null) { chipIcon.setImageBitmap(iconOf(v)); chipName.text = v.label }
+                if (v != null) { chipIcon.setImageDrawable(com.oneuiclone.home.icons.ShapedIconDrawable(iconOf(v))); chipName.text = v.label }
                 this.field.hint = if (v != null) "" else hintText()
             }
 
@@ -967,7 +967,7 @@ class QuickOpenPanel(
             picksView.removeAllViews()
             apps.forEachIndexed { i, app ->
                 val chip = ImageView(context).apply {
-                    setImageBitmap(iconOf(app))
+                    setImageDrawable(com.oneuiclone.home.icons.ShapedIconDrawable(iconOf(app)))
                     contentDescription = "Remove ${app.label}"
                     setOnClickListener { unpick(app) }
                 }

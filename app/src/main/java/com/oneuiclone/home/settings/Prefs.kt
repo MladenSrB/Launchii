@@ -8,7 +8,7 @@ class Prefs(context: Context) {
     val sp: SharedPreferences = context.getSharedPreferences("home_settings", Context.MODE_PRIVATE)
 
     // whatever reads the settings first (Home, a widget, a settings page) sets the icon shape for this process
-    init { com.oneuiclone.home.icons.IconShape.current = iconShape }
+    init { com.oneuiclone.home.icons.IconShape.current = iconShape; com.oneuiclone.home.icons.IconFactory.comicBorder = comicBorder }
 
     var homeCols: Int get() = sp.getInt("home_cols", 4); set(v) = sp.edit().putInt("home_cols", v).apply()
     var homeRows: Int get() = sp.getInt("home_rows", 6); set(v) = sp.edit().putInt("home_rows", v).apply()
@@ -48,6 +48,9 @@ class Prefs(context: Context) {
     /** Icons › Icon shape (IconShape.SQUIRCLE, CIRCLE, …). Setting it moves IconShape.current along with it. */
     var iconShape: String get() = sp.getString("icon_shape", com.oneuiclone.home.icons.IconShape.SQUIRCLE) ?: com.oneuiclone.home.icons.IconShape.SQUIRCLE
         set(v) { sp.edit().putString("icon_shape", v).apply(); com.oneuiclone.home.icons.IconShape.current = v }
+    /** Icons › Comic border: Comic icons' black ink border. Setting it moves IconFactory.comicBorder along with it. */
+    var comicBorder: Boolean get() = sp.getBoolean("comic_border", true)
+        set(v) { sp.edit().putBoolean("comic_border", v).apply(); com.oneuiclone.home.icons.IconFactory.comicBorder = v }
     /** Theme icons on the Apps screen and in search too, not just Home (needs [themedIcons]). */
     var themeAppsScreen: Boolean get() = sp.getBoolean("theme_apps_screen", false); set(v) = sp.edit().putBoolean("theme_apps_screen", v).apply()
     /**

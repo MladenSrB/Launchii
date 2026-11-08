@@ -404,11 +404,12 @@ class FolderController(
         homeContent().alpha = 1f
     }
 
-    /** Bitmap-only icon used for the flight. */
+    /** Bitmap-only icon used for the flight, cut to the icon shape (the Pixel 10's white corners, 0.181). */
     private class FlyingIcon(context: Context, private val bmp: Bitmap?) : View(context) {
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        private val shaped = com.oneuiclone.home.icons.ShapedIcon()
         override fun onDraw(canvas: Canvas) {
-            bmp?.let { canvas.drawBitmap(it, null, Rect(0, 0, width, height), paint) }
+            bmp?.let { shaped.draw(canvas, it, Rect(0, 0, width, height), paint) }
         }
     }
 

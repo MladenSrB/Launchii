@@ -45,6 +45,7 @@ class IconThemeActivity : OneUiPage() {
         private val THEMED = setOf(1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12)
         /** The styles with a light and a dark version (Dot, Prism and the playful ones), which get Light or dark. */
         private val LIGHT_AND_DARK = setOf(5, 6, 9, 10, 11, 12)
+        private const val COMIC = 11
         /** Each look's style index. */
         private val LOOKS = mapOf(
             5 to com.oneuiclone.home.icons.IconFactory.LOOK_DOT,
@@ -242,11 +243,13 @@ class IconThemeActivity : OneUiPage() {
             lateinit var modeRows: List<View>
             lateinit var anyRows: List<View>
             lateinit var frostedRows: List<View>
+            lateinit var comicRows: List<View>
             fun showFor(s: Int) {
                 themedRows.forEach { it.visibility = if (s in THEMED) View.VISIBLE else View.GONE }
                 modeRows.forEach { it.visibility = if (s in LIGHT_AND_DARK) View.VISIBLE else View.GONE }
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }
+                comicRows.forEach { it.visibility = if (s == COMIC) View.VISIBLE else View.GONE }
             }
             // the themes have their own page (IconThemePickerActivity); coming back shows the one picked there
             val chevron = android.widget.ImageView(this).apply { setImageDrawable(Chevron(sub, dp(10f), d, right = true)) }
@@ -259,6 +262,11 @@ class IconThemeActivity : OneUiPage() {
                 val mode = MODES.indexOfFirst { it.first == prefs.iconMode }.coerceAtLeast(0)
                 dropdown("Light or dark", MODES.map { it.second }, mode, MODE_SUMMARIES) { m ->
                     prefs.iconMode = MODES[m].first; refreshDock()
+                }
+            }
+            comicRows = added {
+                toggle("Comic border", "The black ink outline around each icon.", prefs.comicBorder) {
+                    prefs.comicBorder = it; refreshDock()
                 }
             }
             themedRows = added {

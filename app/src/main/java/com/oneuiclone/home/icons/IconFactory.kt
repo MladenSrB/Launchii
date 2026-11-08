@@ -88,6 +88,8 @@ class IconFactory(private val context: Context) {
         const val LOOK_SPRINKLES = "sprinkles"
         /** Icon theme › Comic: the app's colour with halftone dots and an ink border, the glyph yellow in thick ink. */
         const val LOOK_COMIC = "comic"
+        /** Comic's ink border round the icon (Icons › Comic border, Prefs.comicBorder); off leaves just the plate. */
+        @Volatile var comicBorder = true
         /** Icon theme › Groovy: the glyph cut out of cream, ringed by three 70s stripes in the app's colour family. */
         const val LOOK_GROOVY = "groovy"
         /** The playful looks (the Zoom In card fills in around them: LaunchCard.PLAYFUL_FROM_ALPHA). */
@@ -555,7 +557,7 @@ class IconFactory(private val context: Context) {
     }
 
     /**
-     * Pop art: the app's colour with halftone dots fading out toward the top left and a black ink border; the glyph in
+     * Pop art: the app's colour with halftone dots fading out toward the top left and a black ink border ([comicBorder]); the glyph in
      * comic-book yellow (white for yellow apps) with a thick ink outline and a hard offset shadow. Recycles [glyph].
      */
     private fun comic(glyph: Bitmap, size: Int, night: Boolean, brand: Int?): Bitmap {
@@ -592,8 +594,10 @@ class IconFactory(private val context: Context) {
         c.drawColor(plate)
         c.drawBitmap(dots, 0f, 0f, bitmapPaint)
         dots.recycle()
-        val edge = maskPath(size.toFloat()).apply { transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) }) }
-        c.drawPath(edge, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 0.9f * k; color = COMIC_INK })
+        if (comicBorder) {
+            val edge = maskPath(size.toFloat()).apply { transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) }) }
+            c.drawPath(edge, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 0.9f * k; color = COMIC_INK })
+        }
         c.drawBitmap(outline, 0.9f * k, 0.9f * k, bitmapPaint)
         c.drawBitmap(outline, 0f, 0f, bitmapPaint)
         c.drawBitmap(face, 0f, 0f, bitmapPaint)

@@ -132,7 +132,7 @@ class DragController(
         src.labelAlpha = 0f
         src.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
-        val dv = DragView(context, bmp)
+        val dv = DragView(context, bmp, shape = src !is FolderIconView)
         overlay.addView(dv, FrameLayout.LayoutParams(dragSize, dragSize))
         dv.x = startX; dv.y = startY
         dv.elevation = dp.dp(8f)
@@ -843,8 +843,11 @@ class DragController(
     }
 
     /** Draws either an icon bitmap or, for widgets, the live source view (no software snapshot). */
-    private class DragView(context: Context, private val bmp: Bitmap?, private val live: View? = null) : View(context) {
+    private class DragView(context: Context, private val bmp: Bitmap?, private val live: View? = null,
+                           private val shape: Boolean = false) : View(context) {
         private val p = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        /** App icons are cut to the icon shape (the Pixel 10's white corners, 0.181). */
+        private val shaped = if (shape) com.oneuiclone.home.icons.ShapedIcon() else null
         /** Extra scale over a folder target, on top of the pickup's (which animates scaleX / scaleY). */
         var hover = 1f
             set(v) { field = v; invalidate() }
@@ -861,7 +864,8 @@ class DragController(
         override fun onDraw(canvas: Canvas) {
             canvas.save()
             canvas.scale(hover, hover, width / 2f, height / 2f)
-            if (live != null) live.draw(canvas) else bmp?.let { canvas.drawBitmap(it, null, Rect(0, 0, width, height), p) }
+            if (live != null) live.draw(canvas)
+            else bmp?.let { if (shaped != null) shaped.draw(canvas, it, Rect(0, 0, width, height), p) else canvas.drawBitmap(it, null, Rect(0, 0, width, height), p) }
             canvas.restore()
         }
     }
