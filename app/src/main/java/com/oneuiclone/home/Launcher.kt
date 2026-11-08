@@ -465,7 +465,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         m.prune()
         if (knownApps.isNotEmpty() && prefs.addNewApps) {
-            apps.filter { it.key !in knownApps }.forEach { addToHome(it, rebind = false) }
+            // an app back from an update was "new" to the last list but kept its spot (prune): not a second icon
+            val onHome = m.items.mapNotNullTo(HashSet()) { (it as? HomeItem.App)?.key }
+            apps.filter { it.key !in knownApps && it.key !in onHome }.forEach { addToHome(it, rebind = false) }
         }
         knownApps = apps.map { it.key }.toHashSet()
         reflowGrid(m)

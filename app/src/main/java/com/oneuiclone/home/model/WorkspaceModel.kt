@@ -145,10 +145,28 @@ class WorkspaceModel(private val context: Context, private val repo: AppReposito
         tmp.renameTo(file)
     }
 
-    /** Remove entries whose app no longer exists. */
+    /**
+     * Remove entries whose app is really gone: uninstalled, or its profile removed. An app that's only missing from the
+     * list for now (being updated, its profile paused or locked, a list read half-way) keeps its spot, unshown until it's
+     * back; one whose activity an update renamed moves to the package's new one. Deleting on absence alone emptied Home.
+     */
     fun prune() {
-        val dead = items.filterIsInstance<HomeItem.App>().filter { repo.get(it.key) == null }
-        if (dead.isEmpty()) return
+        if (repo.apps.isEmpty()) return
+        val missing = items.filterIsInstance<HomeItem.App>().filter { repo.get(it.key) == null }
+        if (missing.isEmpty()) return
+        val dead = ArrayList<HomeItem.App>()
+        var moved = false
+        for (a in missing) {
+            when (val s = repo.whereIs(a.key)) {
+                AppRepository.Gone -> dead += a
+                is AppRepository.Moved ->
+                    if (items.any { it is HomeItem.App && it.key == s.key }) dead += a
+                    else { items[items.indexOf(a)] = a.copy(key = s.key); moved = true }
+                AppRepository.Away -> Unit
+            }
+        }
+        android.util.Log.i("OneUiHome", "prune: ${missing.size} missing, ${dead.size} gone, moved=$moved")
+        if (dead.isEmpty()) { if (moved) save(); return }
         items.removeAll(dead.toSet())
         // dissolve folders that became too small
         for (f in items.filterIsInstance<HomeItem.Folder>().toList()) {

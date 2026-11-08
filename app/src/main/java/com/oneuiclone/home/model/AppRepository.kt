@@ -94,6 +94,26 @@ class AppRepository(private val context: Context, private val iconFactory: IconF
     fun findByPackage(pkg: String, user: UserHandle = Process.myUserHandle()): AppInfo? =
         apps.firstOrNull { it.key.component.packageName == pkg && it.user == user }
 
+    /** Where an app missing from [apps] is (see [whereIs]). */
+    sealed class Missing
+    /** Uninstalled, or its profile is gone. */
+    object Gone : Missing()
+    /** Still installed, under another activity (an update renamed it). */
+    class Moved(val key: AppKey) : Missing()
+    /** Still installed but not listed for now: being updated, disabled, or its profile paused or locked. */
+    object Away : Missing()
+
+    fun whereIs(key: AppKey): Missing {
+        val user = userManager.getUserForSerialNumber(key.userSerial) ?: return Gone
+        if (!userManager.isUserUnlocked(user) || userManager.isQuietModeEnabled(user)) return Away
+        val pkg = key.component.packageName
+        val installed = try { launcherApps.getApplicationInfo(pkg, 0, user) != null }
+            catch (_: android.content.pm.PackageManager.NameNotFoundException) { false }
+            catch (_: Exception) { return Away }
+        if (!installed) return Gone
+        return findByPackage(pkg, user)?.let { Moved(it.key) } ?: Away
+    }
+
     /**
      * [force]: re-render every icon. It belongs to this reload, so one already running (some of its icons drawn with the
      * old settings) can't use up a re-render queued behind it, which would then keep those icons.
