@@ -61,6 +61,8 @@ class AppRepository(private val context: Context, private val iconFactory: IconF
     @Volatile var iconShape = com.oneuiclone.home.icons.IconShape.SQUIRCLE
     /** Whether Comic icons were last drawn with their ink border (IconFactory reads IconFactory.comicBorder as it draws). */
     @Volatile var comicBorder = true
+    /** Whether the app's own icons were last drawn with their shine (IconFactory reads IconFactory.iconShine as it draws). */
+    @Volatile var iconShine = true
     /** Glass icons: how opaque a themed icon's plate is (1 = solid). */
     @Volatile var plateAlpha = 1f
 

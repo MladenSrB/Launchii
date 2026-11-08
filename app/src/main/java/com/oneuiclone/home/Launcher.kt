@@ -335,7 +335,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             val nr = AppRepository(activity, iconFactory, dp.iconSizePx).also {
                 it.themedIcons = prefs.themedIcons; it.themeAllApps = prefs.themeAllApps; it.plateAlpha = prefs.iconPlateAlpha
                 it.darkIcons = prefs.darkIcons; it.minimalIcons = prefs.minimalIcons; it.iconLook = prefs.iconLook; it.iconMode = prefs.iconMode
-                it.iconShape = prefs.iconShape; it.comicBorder = prefs.comicBorder
+                it.iconShape = prefs.iconShape; it.comicBorder = prefs.comicBorder; it.iconShine = prefs.iconShine
             }
             repo = nr
             model = WorkspaceModel(activity, nr)
@@ -345,10 +345,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             val themeChanged = r.themedIcons != prefs.themedIcons || r.themeAllApps != prefs.themeAllApps ||
                 r.plateAlpha != prefs.iconPlateAlpha || r.darkIcons != prefs.darkIcons ||
                 r.minimalIcons != prefs.minimalIcons || r.iconLook != prefs.iconLook || r.iconMode != prefs.iconMode ||
-                r.iconShape != prefs.iconShape || r.comicBorder != prefs.comicBorder
+                r.iconShape != prefs.iconShape || r.comicBorder != prefs.comicBorder || r.iconShine != prefs.iconShine
             r.themedIcons = prefs.themedIcons
             r.iconShape = prefs.iconShape
             r.comicBorder = prefs.comicBorder
+            r.iconShine = prefs.iconShine
             r.iconLook = prefs.iconLook
             r.iconMode = prefs.iconMode
             r.darkIcons = prefs.darkIcons

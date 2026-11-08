@@ -244,12 +244,14 @@ class IconThemeActivity : OneUiPage() {
             lateinit var anyRows: List<View>
             lateinit var frostedRows: List<View>
             lateinit var comicRows: List<View>
+            lateinit var defaultRows: List<View>
             fun showFor(s: Int) {
                 themedRows.forEach { it.visibility = if (s in THEMED) View.VISIBLE else View.GONE }
                 modeRows.forEach { it.visibility = if (s in LIGHT_AND_DARK) View.VISIBLE else View.GONE }
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }
                 comicRows.forEach { it.visibility = if (s == COMIC) View.VISIBLE else View.GONE }
+                defaultRows.forEach { it.visibility = if (s == 0) View.VISIBLE else View.GONE }
             }
             // the themes have their own page (IconThemePickerActivity); coming back shows the one picked there
             val chevron = android.widget.ImageView(this).apply { setImageDrawable(Chevron(sub, dp(10f), d, right = true)) }
@@ -267,6 +269,11 @@ class IconThemeActivity : OneUiPage() {
             comicRows = added {
                 toggle("Comic border", "The black ink outline around each icon.", prefs.comicBorder) {
                     prefs.comicBorder = it; refreshDock()
+                }
+            }
+            defaultRows = added {
+                toggle("Icon contour", "The soft light and shading along the edge of each icon. Off for a plain, flat look.", prefs.iconShine) {
+                    prefs.iconShine = it; refreshDock()
                 }
             }
             themedRows = added {

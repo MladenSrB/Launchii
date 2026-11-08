@@ -90,6 +90,8 @@ class IconFactory(private val context: Context) {
         const val LOOK_COMIC = "comic"
         /** Comic's ink border round the icon (Icons › Comic border, Prefs.comicBorder); off leaves just the plate. */
         @Volatile var comicBorder = true
+        /** The app's own icons' One UI shine (the emboss: a light rim along the top, a faint dark one all round; Icons › Icon contour, Prefs.iconShine). */
+        @Volatile var iconShine = true
         /** Icon theme › Groovy: the glyph cut out of cream, ringed by three 70s stripes in the app's colour family. */
         const val LOOK_GROOVY = "groovy"
         /** The playful looks (the Zoom In card fills in around them: LaunchCard.PLAYFUL_FROM_ALPHA). */
@@ -269,7 +271,7 @@ class IconFactory(private val context: Context) {
         val glyph = mono.constantState?.newDrawable(res)?.mutate() ?: mono.mutate()
         glyph.setTint(fg)
         val themed = AdaptiveIconDrawable(android.graphics.drawable.ColorDrawable(bg), glyph)
-        return create(themed, size, night = false, opaqueBase = plateAlpha >= 1f)
+        return create(themed, size, night = false, opaqueBase = plateAlpha >= 1f, emboss = true)
     }
 
     /** Minimal icon: [createThemed]'s white glyph on its own, no plate ([minimal]). Falls back to the normal icon. */
@@ -940,7 +942,7 @@ class IconFactory(private val context: Context) {
                 style = Paint.Style.STROKE; strokeWidth = w; color = 0x2E000000
             })
         }
-        applyEmboss(c, size)
+        if (dark || iconShine) applyEmboss(c, size)
         return clip(layers, size)
     }
 
@@ -1158,9 +1160,9 @@ class IconFactory(private val context: Context) {
 
     /**
      * Render [src] as a One UI 8.5 icon of [size] px. [opaqueBase] false keeps a see-through background layer
-     * see-through (glass icons) instead of over black.
+     * see-through (glass icons) instead of over black. [emboss] false leaves the shine off ([iconShine]).
      */
-    fun create(src: Drawable, size: Int, night: Boolean = isNight(), opaqueBase: Boolean = true): Bitmap {
+    fun create(src: Drawable, size: Int, night: Boolean = isNight(), opaqueBase: Boolean = true, emboss: Boolean = iconShine): Bitmap {
         val layers = blank(size)
         val c = Canvas(layers)
         if (src is AdaptiveIconDrawable) {
@@ -1168,7 +1170,7 @@ class IconFactory(private val context: Context) {
         } else {
             drawLegacy(c, src, size)
         }
-        applyEmboss(c, size)
+        if (emboss) applyEmboss(c, size)
         if (night) c.drawPaint(nightPaint)
         return clip(layers, size)
     }

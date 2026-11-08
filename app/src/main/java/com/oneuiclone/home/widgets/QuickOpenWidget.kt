@@ -358,7 +358,7 @@ class QuickOpenActivity : Activity() {
                 val prefs = Prefs(context)
                 val night = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
                 return listOf(night, prefs.themedIcons, prefs.themeAllApps, prefs.iconPlateAlpha, prefs.darkIcons,
-                    prefs.themeAppsScreen, prefs.minimalIcons, prefs.iconLook, prefs.iconMode, prefs.iconShape, prefs.comicBorder, context.resources.displayMetrics.density)
+                    prefs.themeAppsScreen, prefs.minimalIcons, prefs.iconLook, prefs.iconMode, prefs.iconShape, prefs.comicBorder, prefs.iconShine, context.resources.displayMetrics.density)
             }
 
             /** Lists the apps and scores them (reusing [old]'s icons), draws the most used, and keeps the result. */
