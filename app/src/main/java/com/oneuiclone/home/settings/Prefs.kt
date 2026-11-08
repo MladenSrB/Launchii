@@ -52,7 +52,7 @@ class Prefs(context: Context) {
     /** Icons › Comic border: Comic icons' black ink border. Setting it moves IconFactory.comicBorder along with it. */
     var comicBorder: Boolean get() = sp.getBoolean("comic_border", true)
         set(v) { sp.edit().putBoolean("comic_border", v).apply(); com.oneuiclone.home.icons.IconFactory.comicBorder = v }
-    /** Icons › Icon contour: the app's own icons' One UI shine. Setting it moves IconFactory.iconShine along with it. */
+    /** Icons › Icon contour: the icons' light rim and edge shading. Setting it moves IconFactory.iconShine along with it. */
     var iconShine: Boolean get() = sp.getBoolean("icon_shine", true)
         set(v) { sp.edit().putBoolean("icon_shine", v).apply(); com.oneuiclone.home.icons.IconFactory.iconShine = v }
     /** Theme icons on the Apps screen and in search too, not just Home (needs [themedIcons]). */

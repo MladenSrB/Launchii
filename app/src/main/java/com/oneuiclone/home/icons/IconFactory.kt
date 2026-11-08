@@ -90,7 +90,7 @@ class IconFactory(private val context: Context) {
         const val LOOK_COMIC = "comic"
         /** Comic's ink border round the icon (Icons › Comic border, Prefs.comicBorder); off leaves just the plate. */
         @Volatile var comicBorder = true
-        /** The app's own icons' One UI shine (the emboss: a light rim along the top, a faint dark one all round; Icons › Icon contour, Prefs.iconShine). */
+        /** The icons' contour (One UI's emboss: a light rim along the top, a faint dark one all round; Satin's light rim; Icons › Icon contour, Prefs.iconShine). */
         @Volatile var iconShine = true
         /** Icon theme › Groovy: the glyph cut out of cream, ringed by three 70s stripes in the app's colour family. */
         const val LOOK_GROOVY = "groovy"
@@ -271,7 +271,7 @@ class IconFactory(private val context: Context) {
         val glyph = mono.constantState?.newDrawable(res)?.mutate() ?: mono.mutate()
         glyph.setTint(fg)
         val themed = AdaptiveIconDrawable(android.graphics.drawable.ColorDrawable(bg), glyph)
-        return create(themed, size, night = false, opaqueBase = plateAlpha >= 1f, emboss = true)
+        return create(themed, size, night = false, opaqueBase = plateAlpha >= 1f)
     }
 
     /** Minimal icon: [createThemed]'s white glyph on its own, no plate ([minimal]). Falls back to the normal icon. */
@@ -388,16 +388,18 @@ class IconFactory(private val context: Context) {
         c.drawPaint(Paint().apply {
             shader = android.graphics.LinearGradient(0f, 0f, size * 0.7f, size.toFloat(), SATIN_STOPS, SATIN_POS, Shader.TileMode.CLAMP)
         })
-        // the rim: a thin light line just inside the edge, brightest at the top
-        val rim = maskPath(size.toFloat()).apply {
-            transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) })
+        // the rim: a thin light line just inside the edge, brightest at the top (Icon contour)
+        if (iconShine) {
+            val rim = maskPath(size.toFloat()).apply {
+                transform(android.graphics.Matrix().apply { setScale(0.97f, 0.97f, mid, mid) })
+            }
+            c.drawPath(rim, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 0.42f * k
+                shader = android.graphics.LinearGradient(0f, 0f, size * 0.4f, size.toFloat(),
+                    intArrayOf(0x61FFFFFF, 0x0FFFFFFF, 0x00FFFFFF, 0x1FFFFFFF), floatArrayOf(0f, 0.3f, 0.75f, 1f), Shader.TileMode.CLAMP)
+            })
         }
-        c.drawPath(rim, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 0.42f * k
-            shader = android.graphics.LinearGradient(0f, 0f, size * 0.4f, size.toFloat(),
-                intArrayOf(0x61FFFFFF, 0x0FFFFFFF, 0x00FFFFFF, 0x1FFFFFFF), floatArrayOf(0f, 0.3f, 0.75f, 1f), Shader.TileMode.CLAMP)
-        })
         // the small soft shadow under the glyph
         val offset = IntArray(2)
         val drop = ink.extractAlpha(Paint().apply { maskFilter = blur(0.4f * k) }, offset)
@@ -942,7 +944,7 @@ class IconFactory(private val context: Context) {
                 style = Paint.Style.STROKE; strokeWidth = w; color = 0x2E000000
             })
         }
-        if (dark || iconShine) applyEmboss(c, size)
+        applyEmboss(c, size)
         return clip(layers, size)
     }
 
@@ -1160,9 +1162,9 @@ class IconFactory(private val context: Context) {
 
     /**
      * Render [src] as a One UI 8.5 icon of [size] px. [opaqueBase] false keeps a see-through background layer
-     * see-through (glass icons) instead of over black. [emboss] false leaves the shine off ([iconShine]).
+     * see-through (glass icons) instead of over black.
      */
-    fun create(src: Drawable, size: Int, night: Boolean = isNight(), opaqueBase: Boolean = true, emboss: Boolean = iconShine): Bitmap {
+    fun create(src: Drawable, size: Int, night: Boolean = isNight(), opaqueBase: Boolean = true): Bitmap {
         val layers = blank(size)
         val c = Canvas(layers)
         if (src is AdaptiveIconDrawable) {
@@ -1170,7 +1172,7 @@ class IconFactory(private val context: Context) {
         } else {
             drawLegacy(c, src, size)
         }
-        if (emboss) applyEmboss(c, size)
+        applyEmboss(c, size)
         if (night) c.drawPaint(nightPaint)
         return clip(layers, size)
     }
@@ -1248,6 +1250,7 @@ class IconFactory(private val context: Context) {
     }
 
     private fun applyEmboss(c: Canvas, size: Int) {
+        if (!iconShine) return
         // the bitmaps follow the squircle's edge; another shape gets the same rims drawn along its own
         if (!IconShape.isSquircle) { IconShape.drawEmboss(c, size); return }
         val dst = Rect(0, 0, size, size)

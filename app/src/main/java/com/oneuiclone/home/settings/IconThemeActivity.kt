@@ -46,6 +46,8 @@ class IconThemeActivity : OneUiPage() {
         /** The styles with a light and a dark version (Dot, Prism and the playful ones), which get Light or dark. */
         private val LIGHT_AND_DARK = setOf(5, 6, 9, 10, 11, 12)
         private const val COMIC = 11
+        /** The styles whose plate has a contour (One UI's emboss, or Satin's rim), which get Icon contour. */
+        private val CONTOURED = setOf(0, 1, 2, 3, 5, 6, 7, 8, 10, 12)
         /** Each look's style index. */
         private val LOOKS = mapOf(
             5 to com.oneuiclone.home.icons.IconFactory.LOOK_DOT,
@@ -244,14 +246,14 @@ class IconThemeActivity : OneUiPage() {
             lateinit var anyRows: List<View>
             lateinit var frostedRows: List<View>
             lateinit var comicRows: List<View>
-            lateinit var defaultRows: List<View>
+            lateinit var contourRows: List<View>
             fun showFor(s: Int) {
                 themedRows.forEach { it.visibility = if (s in THEMED) View.VISIBLE else View.GONE }
                 modeRows.forEach { it.visibility = if (s in LIGHT_AND_DARK) View.VISIBLE else View.GONE }
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }
                 comicRows.forEach { it.visibility = if (s == COMIC) View.VISIBLE else View.GONE }
-                defaultRows.forEach { it.visibility = if (s == 0) View.VISIBLE else View.GONE }
+                contourRows.forEach { it.visibility = if (s in CONTOURED) View.VISIBLE else View.GONE }
             }
             // the themes have their own page (IconThemePickerActivity); coming back shows the one picked there
             val chevron = android.widget.ImageView(this).apply { setImageDrawable(Chevron(sub, dp(10f), d, right = true)) }
@@ -271,7 +273,7 @@ class IconThemeActivity : OneUiPage() {
                     prefs.comicBorder = it; refreshDock()
                 }
             }
-            defaultRows = added {
+            contourRows = added {
                 toggle("Icon contour", "The soft light and shading along the edge of each icon. Off for a plain, flat look.", prefs.iconShine) {
                     prefs.iconShine = it; refreshDock()
                 }
