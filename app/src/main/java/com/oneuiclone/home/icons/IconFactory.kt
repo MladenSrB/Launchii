@@ -46,6 +46,8 @@ class IconFactory(private val context: Context) {
         private val CHROME = setOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
         /** The logo's width as a share of the plate (One UI's Chrome: ≈ 74 %). */
         private const val CHROME_LOGO_FRACTION = 0.74f
+        /** The Chrome logo's white ring (around the blue centre), as a share of its radius. */
+        private const val CHROME_RING = 0.46f
         /** Icon theme › Dot ([homeIcon]'s look): the glyph as an even grid of dots, black on paper or white on black. */
         const val LOOK_DOT = "dot"
         /** Icon theme › Prism: the glyph in a gradient of the app's own colour, on a white or graphite plate. */
@@ -973,10 +975,38 @@ class IconFactory(private val context: Context) {
                     shader = android.graphics.LinearGradient(0f, 0f, 0f, s, IOS_DARK_TOP, IOS_DARK_BOTTOM, Shader.TileMode.CLAMP)
                 })
                 drawChromeLogo(c, s / 2f, s / 2f, s * CHROME_LOGO_FRACTION / 2f)
+            } else if (IconShape.current == IconShape.CIRCLE) {
+                // under the Circle shape, zoomed in as Default draws it: the logo is the whole icon, no white plate.
+                // With Glass's finish, as for any app: the colours are the plate, lit from above; the white ring and the
+                // blue centre are the symbol on top of them, with its soft shadow
+                val r = s * reach(IconShape.CIRCLE)
+                drawChromeLogo(c, s / 2f, s / 2f, r)
+                c.drawPaint(iosLight(s))
+                val glyph = blank(size)
+                Canvas(glyph).apply {
+                    // (clipped, not DST_IN: a blend mode only reaches the pixels the circle itself covers)
+                    clipPath(Path().apply { addCircle(s / 2f, s / 2f, r * CHROME_RING, Path.Direction.CW) })
+                    drawChromeLogo(this, s / 2f, s / 2f, r)
+                }
+                softShadow(c, glyph, size, 0.2f)
+                c.drawBitmap(glyph, 0f, 0f, bitmapPaint)
+                glyph.recycle()
             } else {
-                // zoomed in, as Default draws it under the Circle shape: the logo is the whole icon, no white plate.
-                // It reaches the shape's farthest point, so the corners are logo too (the outer colours run past the edge)
-                drawChromeLogo(c, s / 2f, s / 2f, s * reach(IconShape.current))
+                // any other shape: the logo on its white plate with its grey ring, as Default draws it, with Glass's
+                // finish: the plate lit from above, the logo the symbol on it with its soft shadow
+                c.drawColor(Color.WHITE)
+                c.drawPaint(iosLight(s))
+                val r = s * CHROME_LOGO_FRACTION / 2f
+                val glyph = blank(size)
+                Canvas(glyph).apply {
+                    drawChromeLogo(this, s / 2f, s / 2f, r)
+                    drawCircle(s / 2f, s / 2f, r + s * 0.007f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.STROKE; strokeWidth = s * 0.014f; color = 0x2E000000
+                    })
+                }
+                softShadow(c, glyph, size, 0.14f)
+                c.drawBitmap(glyph, 0f, 0f, bitmapPaint)
+                glyph.recycle()
             }
         } else if (night && !game) {
             val glyph = darkGlyph(src, size)
@@ -1008,6 +1038,15 @@ class IconFactory(private val context: Context) {
     }
     private val reaches = java.util.concurrent.ConcurrentHashMap<String, Float>()
 
+    /**
+     * Glass's light on a plate: about 10 % lighter at the top and 14 % darker at the foot than in the middle (measured
+     * on iOS's plates), over an icon [s] px tall.
+     */
+    private fun iosLight(s: Float) = Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, s, intArrayOf(0x1FFFFFFF, 0x00FFFFFF, 0x00000000, 0x24000000),
+                floatArrayOf(0f, 0.45f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        }
+
     private fun ownIcon(c: Canvas, src: Drawable, size: Int) {
         if (src is AdaptiveIconDrawable) drawAdaptive(c, src, size) else drawLegacy(c, src, size)
     }
@@ -1019,11 +1058,7 @@ class IconFactory(private val context: Context) {
         val bounds = Rect(-inset, -inset, size + inset, size + inset)
         c.drawColor(Color.BLACK)
         d.background?.let { it.bounds = bounds; it.draw(c) }
-        // measured on iOS's plates: about 10 % lighter at the top and 14 % darker at the foot than in the middle
-        c.drawPaint(Paint().apply {
-            shader = android.graphics.LinearGradient(0f, 0f, 0f, s, intArrayOf(0x1FFFFFFF, 0x00FFFFFF, 0x00000000, 0x24000000),
-                floatArrayOf(0f, 0.45f, 0.55f, 1f), Shader.TileMode.CLAMP)
-        })
+        c.drawPaint(iosLight(s))
         val fg = d.foreground ?: return
         val glyph = blank(size)
         fg.bounds = bounds
@@ -1147,7 +1182,7 @@ class IconFactory(private val context: Context) {
      * bottom left), each bounded by a line tangent to the ring, the line of the next one rotated 120°.
      */
     private fun drawChromeLogo(c: Canvas, cx: Float, cy: Float, r: Float) {
-        val ring = r * 0.46f
+        val ring = r * CHROME_RING
         val blue = r * 0.37f
         // the red segment's lines end on the outer circle at alpha (right) and alpha + 240° (upper left)
         val alpha = Math.toDegrees(-kotlin.math.asin((ring / r).toDouble())).toFloat()

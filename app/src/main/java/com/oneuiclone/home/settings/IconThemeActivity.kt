@@ -50,8 +50,6 @@ class IconThemeActivity : OneUiPage() {
         private const val COMIC = 11
         /** Glass works from every app's own icon, so Theme all apps doesn't apply to it. */
         private const val GLASS = 13
-        /** The looks drawn for the Square icon shape: picking one switches Icon shape to Square. */
-        private val SQUARE_LOOKS = setOf(GLASS)
         /** The styles whose plate has a contour (One UI's emboss, Satin's or Glass's rim), which get Icon contour. */
         private val CONTOURED = setOf(0, 1, 2, 3, 5, 6, 7, 8, 10, 12, 13)
         /** Each look's style index. */
@@ -67,9 +65,8 @@ class IconThemeActivity : OneUiPage() {
             13 to com.oneuiclone.home.icons.IconFactory.LOOK_IOS,
         )
 
-        /** Saves style [s] (Default, Themed, …, Glass); Glass brings the Square icon shape with it. */
+        /** Saves style [s] (Default, Themed, …, Glass). The icon shape stays as it is (the user's choice, 0.209). */
         fun apply(s: Int, prefs: Prefs) {
-            if (s in SQUARE_LOOKS) prefs.iconShape = com.oneuiclone.home.icons.IconShape.SQUARE
             prefs.themedIcons = s in THEMED
             prefs.glassIcons = s == 2
             prefs.darkIcons = s == 3
@@ -118,7 +115,7 @@ class IconThemeActivity : OneUiPage() {
     }
 
     override fun build() {
-        // Glass switches the icon shape from the theme page: show the new one in the shape row too
+        // the icon shape changed while this page was away: show the new one in the shape row too
         if (built && prefs.iconShape != shapeShown) { recreate(); return }
         if (!built) { built = true; shapeShown = prefs.iconShape; layout() } else onReturn?.invoke(style(prefs))
         preview.load { refreshDock() }

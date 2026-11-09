@@ -40,9 +40,16 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         val popPlate get() = if (shown == OUTSIDE) POP_PLATE else 1f
         /** Pixel: apps 5 and up show only inside (Launcher3's MAX_NUM_ITEMS_IN_PREVIEW). */
         const val PIXEL_SLOTS = 4
-        /** Pixel's app icons as a share of the plate: three or fewer, four (Launcher3's are 0.42 and 0.36). */
+        /**
+         * Pixel's app icons as a share of the plate, and their centres' distance from its middle. Pixel Launcher's four
+         * measure 0.40 at 0.24 (the user's screenshot); the user wants them bigger still, so 0.43, nearly touching.
+         */
+        const val PIXEL_SIZE_FOUR = 0.43f
+        const val PIXEL_OFFSET_FOUR = 0.24f
         const val PIXEL_SIZE_FEW = 0.46f
-        const val PIXEL_SIZE_FOUR = 0.40f
+        const val PIXEL_OFFSET_TWO = 0.26f
+        const val PIXEL_OFFSET_THREE = 0.27f
+        const val PIXEL_SIZE_ONE = 0.52f
         /** Prefs.popupFolders, kept in step by Prefs: which grid the folder opens in (Pixel's preview shows its top left). */
         @Volatile var popupFolders = false
 
@@ -178,8 +185,11 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         val size = SIZE_RATIO * f
         val start = (f - (GRID - 1) * gap - GRID * size) / 2f
         val step = gap + size
+        // a round folder with only one or two rows centres them, rather than leaving the third row's space below
+        val rows = (previews.size.coerceIn(1, GRID * GRID) + GRID - 1) / GRID
+        val lift = if (IconShape.container == IconShape.CIRCLE) (GRID - rows) * step / 2f else 0f
         val x = start + (rank % GRID) * step
-        val y = start + (rank / GRID) * step
+        val y = start + (rank / GRID) * step + lift
         out.set(x, y, x + size, y + size)
     }
 
@@ -191,8 +201,9 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
     private fun poppedRect(rank: Int, out: RectF) {
         val n = previews.size.coerceIn(1, GRID * GRID)
         val cols = if (n <= 4) 2 else 3
-        val pitch = when { n <= 2 -> 0.6f; n <= 4 -> 0.508f; n <= 6 -> 0.34f; else -> 0.295f }
-        val size = when { n <= 2 -> 0.42f; n <= 4 -> 0.36f; n <= 6 -> 0.31f; else -> 0.27f }
+        // (0.207: about 8 % bigger and set further out than 0.199's 0.6/0.508/0.34/0.295 and 0.42/0.36/0.31/0.27)
+        val pitch = when { n <= 2 -> 0.64f; n <= 4 -> 0.55f; n <= 6 -> 0.37f; else -> 0.32f }
+        val size = when { n <= 2 -> 0.45f; n <= 4 -> 0.39f; n <= 6 -> 0.335f; else -> 0.29f }
         // the plate's side: the mask inset 3/180 each side (see ensureShape), at plateScale
         val plate = iconSize * (1f - 6f / 180f) * plateScale
         val rows = (n + cols - 1) / cols
@@ -205,23 +216,24 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
     }
 
     /**
-     * Pixel: Launcher3's ClippedFolderIconLayoutRule on the plate. Up to four apps on a circle 1.15× the plate
-     * (widened up to 25 % for four), from the left (two), the top (three) or the top-left (four), clockwise, four in
-     * reading order; a little bigger than Launcher3's (the user's choice): 0.46 of the plate for three or fewer, 0.40
-     * for four. One app sits in the middle.
+     * Pixel: placed as Pixel Launcher places them, measured from its Home screen (the user's screenshot), a little
+     * bigger: four in a tight 2×2, centres [PIXEL_OFFSET_FOUR] of the plate from its middle; three in a triangle, the
+     * top one first, clockwise; two side by side; one in the middle. Four in reading order.
      */
     private fun pixelRect(rank: Int, out: RectF) {
         val n = previews.size.coerceIn(1, PIXEL_SLOTS)
         val plate = iconSize * (1f - 6f / 180f) * plateScale
-        val size = (if (n <= 3) PIXEL_SIZE_FEW else PIXEL_SIZE_FOUR) * plate
+        val size = when (n) { 1 -> PIXEL_SIZE_ONE; 4 -> PIXEL_SIZE_FOUR; else -> PIXEL_SIZE_FEW } * plate
         val c = iconSize / 2f
-        if (n == 1) { out.set(c - size / 2f, c - size / 2f, c + size / 2f, c + size / 2f); return }
-        val radius = 1.15f / 2f * (1f + 0.25f * (n - 2) / 2f)
-        val theta0 = Math.PI - when (n) { 3 -> Math.PI / 2; 4 -> Math.PI / 4; else -> 0.0 }
-        val i = if (n == 4 && rank == 2) 3 else if (n == 4 && rank == 3) 2 else rank
-        val theta = theta0 - i * 2 * Math.PI / n
-        val x = c + (radius * Math.cos(theta) / 2f).toFloat() * plate
-        val y = c - (radius * Math.sin(theta) / 2f).toFloat() * plate
+        val (dx, dy) = when (n) {
+            1 -> 0f to 0f
+            2 -> (if (rank == 0) -PIXEL_OFFSET_TWO else PIXEL_OFFSET_TWO) to 0f
+            3 -> when (rank) { 0 -> 0f to -PIXEL_OFFSET_THREE; 1 -> PIXEL_OFFSET_THREE * 0.866f to PIXEL_OFFSET_THREE * 0.5f
+                else -> -PIXEL_OFFSET_THREE * 0.866f to PIXEL_OFFSET_THREE * 0.5f }
+            else -> (if (rank % 2 == 0) -PIXEL_OFFSET_FOUR else PIXEL_OFFSET_FOUR) to (if (rank < 2) -PIXEL_OFFSET_FOUR else PIXEL_OFFSET_FOUR)
+        }
+        val x = c + dx * plate
+        val y = c + dy * plate
         out.set(x - size / 2f, y - size / 2f, x + size / 2f, y + size / 2f)
     }
 
