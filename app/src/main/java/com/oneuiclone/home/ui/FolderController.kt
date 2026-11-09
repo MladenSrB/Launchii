@@ -53,6 +53,8 @@ class FolderController(
     private val transparency: (HomeItem.Folder) -> Int? = { null },
     /** Apps rearranged by dragging inside the folder: the folder's apps in their new order. */
     private val onReorder: (HomeItem.Folder, List<HomeItem.App>) -> Unit = { _, _ -> },
+    /** How far a pop-up folder has dimmed and shrunk Home (0 none .. 1 all), every frame: Home scales with it. */
+    private val onOpenness: (Float) -> Unit = {},
 ) {
     companion object {
         const val DURATION = 350L
@@ -64,8 +66,6 @@ class FolderController(
         const val ROWS = 3
         /** One UI's full-folder tray height is for 4 rows; the row height is kept and the tray wraps 3. */
         const val SPEC_GRID = 4
-        /** Pop-up folder: as long as the full folder (Launcher3's 200 ms felt abrupt next to it). */
-        const val POPUP_DURATION = DURATION
         /** Cubic handle lengths (× corner radius): a circular arc's, and the One UI icon mask's along its vertical
          *  sides (43.065 of 49 in ONE_UI_MASK; along the horizontal ones it's 27.063 of 49, the circle's). */
         const val CIRCLE_K = 0.5523f
@@ -75,6 +75,16 @@ class FolderController(
         /** Pop-up folder grid limits (Launcher3 numFolderColumns / numFolderRows); more apps page. */
         const val POPUP_MAX_COLS = 4
         const val POPUP_MAX_ROWS = 3
+        /** Pixel Launcher (recording 6748): an open pop-up dims the whole screen 20 % (status bar and dock too) and
+         *  shrinks all of Home (workspace, page dots, Search, dock) to 97.5 % about the screen centre, both eased
+         *  over 350 ms without a bounce. The wallpaper doesn't move. */
+        const val POPUP_DIM = 0.2f
+        const val POPUP_HOME_SCALE = 0.975f
+        /** The pop-up itself springs (M3 Expressive default spatial: stiffness 380, damping 0.8): open, its apps grow
+         *  ~1.3 % past their size around 290 ms and settle by ~440 ms; close, it dips under the icon and comes back. */
+        const val POPUP_STIFFNESS = 380f
+        const val POPUP_DAMPING = 0.8f
+        const val POPUP_SPRING_MS = 500L
 
         /** Launcher3 FolderGridOrganizer.calculateGridSize: the smallest near-square grid for [count] apps. */
         fun popupGrid(count: Int): Pair<Int, Int> {
@@ -105,19 +115,50 @@ class FolderController(
     private var folderItems: List<HomeItem.App> = emptyList()
     /** An app from the folder is being dragged: the panel stays attached (it has the touch stream) until it ends. */
     private var dragging = false
+    /** How open the folder is (0..1), last set by [report]. */
+    private var openness = 0f
+    /** A pop-up's dim over everything behind the card: just under [overlay], so an app opened from the folder
+     *  (which scales the overlay) doesn't shrink it. */
+    private val dim = View(context).apply { background = android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK) }
+    /** The folder icon where it was before the pop-up shrank Home: what the card closes back into. */
+    private val restRect = Rect()
+    /** Full-screen and never scaled, over the panel: takes the touches while the folder opens ([FolderPanel.openingTouch]). */
+    @SuppressLint("ClickableViewAccessibility")
+    private val catcher = object : View(context) {
+        override fun onTouchEvent(event: MotionEvent) = panel?.openingTouch(event) == true
+    }
+
+    private fun report(e: Float) {
+        openness = e
+        if (dim.parent == null) return
+        dim.background.alpha = (255 * POPUP_DIM * e).roundToInt()
+        onOpenness(e)
+    }
 
     private class Flier(val view: FlyingIcon, val from: RectF, val to: RectF)
 
     /** [placeholder]: the last app is one being dragged in, its cell left empty until it's dropped. */
     fun open(icon: FolderIconView, folder: HomeItem.Folder, apps: List<AppInfo>, items: List<HomeItem.App> = emptyList(),
              placeholder: Boolean = false) {
-        if (isOpen || anim?.isRunning == true) return
+        if (isOpen || dragging) return
+        if (anim?.isRunning == true) {
+            // tapped again while it closes: it turns round where it is
+            val p = panel
+            if (p != null && !placeholder && this.folder?.id == folder.id) {
+                isOpen = true
+                p.passThrough = false
+                runAnimation(open = true)
+                return
+            }
+            finishClose()
+        }
         val dp = dpProvider()
         isOpen = true
         source = icon
         this.folder = folder
         folderItems = items
         val anchor = Rect().also { icon.iconBoundsOnScreen(it) }
+        restRect.set(anchor)
         val p = FolderPanel(context, dp, folder, apps, onLaunch, { title -> onRename(folder, title) }, { close() },
             if (popupFolders()) android.graphics.PointF(anchor.exactCenterX(), anchor.exactCenterY()) else null,
             transparency(folder)?.let { 1f - it / 100f } ?: FolderPanel.GLASS_OPACITY,
@@ -130,7 +171,14 @@ class FolderController(
         p.onAdd = { close(); onAddApps(folder) }
         p.onMore = { onFolderOptions(folder) }
         panel = p
+        val host = overlay.parent as? ViewGroup
+        if (p.isPopup && dim.parent == null && host != null) {
+            dim.background.alpha = 0
+            host.addView(dim, host.indexOfChild(overlay), ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         overlay.addView(p, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        (catcher.parent as? ViewGroup)?.removeView(catcher)
+        overlay.addView(catcher, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         p.measure(View.MeasureSpec.makeMeasureSpec(dp.widthPx, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(dp.heightPx, View.MeasureSpec.EXACTLY))
         p.layout(0, 0, dp.widthPx, dp.heightPx)
@@ -219,6 +267,7 @@ class FolderController(
         val home = homeContent()
         val fromHome = home.alpha
         val fromPanel = p.alpha
+        val fromOpenness = openness
         anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 200
             interpolator = Easing.BASIC
@@ -226,6 +275,7 @@ class FolderController(
                 val f = it.animatedFraction
                 p.alpha = fromPanel * (1f - f)
                 home.alpha = fromHome + (1f - fromHome) * f
+                report(fromOpenness * (1f - f))
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) { if (anim === animation && !dragging && panel === p) finishClose() }
@@ -257,23 +307,48 @@ class FolderController(
         isOpen = false
         panel?.hideKeyboard()
         if (!animate) { finishClose(); return }
+        // a tap while it closes is for Home (the folder icon under the shrinking card reopens it), not its apps
+        panel?.passThrough = true
         runAnimation(open = false)
     }
+
+    /** Closes the folder at once, open or still closing: Home is about to be covered. */
+    fun closeNow() {
+        if (isOpen) close(animate = false) else if (anim?.isRunning == true && !dragging) finishClose()
+    }
+
+    /** Where the last frame left the animation, so a reversal picks up from there instead of jumping. */
+    private var shownE = 0f
+    private var shownF = 0f
+    private var shownTint = 1f
+    private var shownContent = 0f
 
     private fun runAnimation(open: Boolean) {
         val p = panel ?: return
         val icon = source ?: return
         val dp = dpProvider()
-        anim?.cancel()
+        // turning round mid-way (a tap in and out): start from what's on screen
+        val old = anim
+        val turning = old?.isRunning == true
+        anim = null
+        old?.cancel()
+        val e0 = if (turning) shownE else if (open) 0f else 1f
+        val f0 = if (turning) shownF else if (open) 0f else 1f
+        val tint0 = if (turning) shownTint else if (open) 1f else 0f
+        val content0 = if (turning) shownContent else if (open) 0f else 1f
+        val h0 = openness
+        val target = if (open) 1f else 0f
         clearFliers()
 
-        // geometry: container scales from the folder icon
+        // geometry: container scales from the folder icon (a pop-up's, where it was before Home shrank: it is
+        // there again as the close lands)
         val iconRect = Rect()
-        icon.iconBoundsOnScreen(iconRect)
+        if (p.isPopup) iconRect.set(restRect) else icon.iconBoundsOnScreen(iconRect)
         val tray = p.trayRect
         val srcSize = icon.iconSizePx()
         // a wide pop-up card (3×2) shrinks by its height: its centred square is what becomes the icon
-        val startScale = srcSize / (if (p.isPopup) minOf(tray.width(), tray.height()) else tray.width()).toFloat()
+        // (Icons › Folder icons › Outside: the icon's plate is smaller than the icon)
+        val startScale = srcSize * icon.plateScale / (if (p.isPopup) minOf(tray.width(), tray.height()) else tray.width()).toFloat()
         val dx = iconRect.exactCenterX() - tray.exactCenterX()
         val dy = iconRect.exactCenterY() - tray.exactCenterY()
         p.pivotX = tray.exactCenterX()
@@ -283,7 +358,9 @@ class FolderController(
         // from the icon's rounded square to the whole card while it scales up from the icon's size, so it starts
         // and ends exactly as the icon. The full folder scales out a copy of the icon's squircle instead.
         val popup = p.isPopup
-        if (popup) p.prepareReveal(icon.bgColor)
+        // (the icon's fill as the icon draws it: its colour at the folder's fill opacity)
+        if (popup) p.prepareReveal((icon.bgColor and 0x00FFFFFF) or
+            ((android.graphics.Color.alpha(icon.bgColor) * icon.fillOpacity).toInt() shl 24))
 
         // folder container bitmap that scales with the panel
         val bgCopy = FolderBgCopy(context, icon)
@@ -293,9 +370,13 @@ class FolderController(
 
         // flying preview icons
         val previewRect = RectF()
-        val visible = (icon as? LargeFolderIconView)?.let { if (it.hasStack) 3 else 4 } ?: (FolderIconView.GRID * FolderIconView.GRID)
-        p.gridIcons().filter { it !== p.placeholder }.take(visible).forEachIndexed { rank, target ->
-            icon.childRect(rank, previewRect)
+        // (Icons › Folder icons › Pixel: the four in the preview fly to their places; the rest come with the card)
+        val visible = (icon as? LargeFolderIconView)?.let { if (it.hasStack) 3 else 4 } ?: icon.previewSlots
+        val inFolder = p.gridIcons().filter { it !== p.placeholder }
+        (0 until minOf(visible, inFolder.size)).forEach { slot ->
+            // (Pixel's preview shows the folder's top-left 2×2, not its first four)
+            val target = inFolder.getOrNull(if (icon is LargeFolderIconView) slot else icon.rankInSlot(slot)) ?: return@forEach
+            icon.childRect(slot, previewRect)
             previewRect.offset(iconRect.left.toFloat(), iconRect.top.toFloat())
             val to = RectF(p.iconRectInPanel(target))
             val fly = FlyingIcon(context, target.icon)
@@ -305,13 +386,15 @@ class FolderController(
         }
         icon.previewAlpha = 0f
         icon.containerAlpha = 0f
-        p.contentAlpha(0f, fliers.isNotEmpty())
+        p.contentAlpha(content0, fliers.isNotEmpty())
+        // while it opens, a tap goes by where the apps are landing (a quick tap aims at the app's place)
+        p.opening = open
 
         // Both 350 ms on the folder curve. The pop-up leaves Home as it is behind the card; the full folder fades
         // Home out over a blurred, dimmed wallpaper. The pop-up card isn't faded as a whole (the reveal shapes
         // it), so it needs no offscreen layer redrawn on every frame.
-        val total = if (popup) POPUP_DURATION else DURATION
-        val curve = Easing.FOLDER
+        val total = if (popup) POPUP_SPRING_MS else DURATION
+        val curve = if (popup) Easing.spring(POPUP_STIFFNESS, POPUP_DAMPING, total) else Easing.FOLDER
         val home = homeContent()
         val fromDrag = open && background.current == BackgroundController.Kind.DRAG
         if (!popup) {
@@ -323,18 +406,22 @@ class FolderController(
             interpolator = Easing.LINEAR
             addUpdateListener { a ->
                 val t = a.animatedFraction
-                val f = if (open) t else 1f - t                       // 0 = closed, 1 = open
-                val e = curve.getInterpolation(t).let { if (open) it else 1f - it }
+                val f = f0 + (target - f0) * t                        // 0 = closed, 1 = open
+                val e = e0 + (target - e0) * curve.getInterpolation(t)
+                shownE = e; shownF = f
                 // container (AbstractC0653q1.I)
                 val s = startScale + (1f - startScale) * e
                 p.scaleX = s; p.scaleY = s
                 p.translationX = dx * (1f - e); p.translationY = dy * (1f - e)
                 val ms = t * total
                 if (popup) {
+                    // Home dims and shrinks on the folder curve, not the spring (it doesn't bounce)
+                    report(h0 + (target - h0) * Easing.FOLDER.getInterpolation((ms / DURATION).coerceAtMost(1f)))
                     // the icon's colour over the card hands over to the card's own look early in the open and
-                    // comes back at the end of the close (nothing to hand over with Style › Blur: they're the same)
-                    val tint = if (open) 1f - ms / 140f else (ms - total + 140f) / 140f
-                    p.setReveal(e, tint.coerceIn(0f, 1f))
+                    // comes back as the close reaches the icon (nothing to hand over with Style › Blur: they're the same)
+                    val tint = (if (open) tint0 - ms / 140f else 1f - e / 0.12f).coerceIn(0f, 1f)
+                    shownTint = tint
+                    p.setReveal(e, tint)
                 } else p.alpha = e.coerceIn(0f, 1f)
                 // container bitmap: scales with the panel, fades over BG_FADE_DURATION after BG_FADE_DELAY (open) / 60 ms (close)
                 val bs = (tray.width() / srcSize.toFloat() - 1f) * e + 1f
@@ -354,9 +441,10 @@ class FolderController(
                     fl.view.scaleX = sc; fl.view.scaleY = sc
                 }
                 // labels & other content of the panel
-                val content = if (popup) (if (open) (ms - 100f) / 200f else 1f - ms / 160f)
-                    else (if (open) (ms - 40f) / 200f else 1f - ms / 200f)
-                p.contentAlpha(content.coerceIn(0f, 1f), fliers.isNotEmpty())
+                val content = if (open) content0 + (1f - content0) * (if (popup) (ms - 100f) / 200f else (ms - 40f) / 200f).coerceIn(0f, 1f)
+                    else content0 * (1f - (if (popup) ms / 160f else ms / 200f)).coerceIn(0f, 1f)
+                shownContent = content
+                p.contentAlpha(content, fliers.isNotEmpty())
                 // background + home fade (DEACCEL_2)
                 if (!popup) {
                     // opened by a drag hovering on it: from the drag's background
@@ -372,7 +460,9 @@ class FolderController(
                         home.setLayerType(View.LAYER_TYPE_NONE, null)
                         p.setLayerType(View.LAYER_TYPE_NONE, null)
                     }
+                    if (anim !== animation) return                  // replaced (turned round or closed at once)
                     if (open) {
+                        p.opening = false
                         p.gridIcons().forEach { if (it !== p.placeholder) it.iconVisible = true }
                         p.contentAlpha(1f, false)
                         clearFliers()
@@ -395,6 +485,7 @@ class FolderController(
         clearFliers()
         panel?.let { overlay.removeView(it) }
         panel = null
+        overlay.removeView(catcher)
         source?.apply { previewAlpha = 1f; containerAlpha = 1f }
         source = null
         folder = null
@@ -402,6 +493,10 @@ class FolderController(
         // (a drag that left the folder has the background now)
         if (background.current == BackgroundController.Kind.FOLDER) background.set(BackgroundController.Kind.FOLDER, 0f)
         homeContent().alpha = 1f
+        if (dim.parent != null) {
+            report(0f)
+            (dim.parent as ViewGroup).removeView(dim)
+        }
     }
 
     /** Bitmap-only icon used for the flight, cut to the icon shape (the Pixel 10's white corners, 0.181). */
@@ -429,7 +524,10 @@ class FolderController(
         private val path = android.graphics.Path()
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             path.reset()
-            com.oneuiclone.home.icons.IconFactory.maskPath(w.toFloat()).let { path.set(it) }
+            com.oneuiclone.home.icons.IconShape.path(w.toFloat(), com.oneuiclone.home.icons.IconShape.container).let { path.set(it) }
+            // the icon's plate (smaller when its apps poke out)
+            val s = src.plateScale
+            if (s != 1f) path.transform(android.graphics.Matrix().apply { setScale(s, s, w / 2f, h / 2f) })
         }
         fun moved() { if (glass != null) invalidate() }
         override fun onDraw(canvas: Canvas) {
@@ -623,21 +721,35 @@ class FolderPanel(
                 val f = reveal
                 revealRect.set(revealFrom.left + (0f - revealFrom.left) * f, revealFrom.top + (0f - revealFrom.top) * f,
                     revealFrom.right + (view.width - revealFrom.right) * f, revealFrom.bottom + (view.height - revealFrom.bottom) * f)
-                if (com.oneuiclone.home.icons.IconShape.isSquircle) {
+                // (the folder's shape: Icons › Keep folders and widgets squircle keeps it One UI's)
+                val shape = com.oneuiclone.home.icons.IconShape.container
+                if (shape == com.oneuiclone.home.icons.IconShape.SQUIRCLE) {
                     val r = revealFrom.width() / 2f + (dp.dp(28f) - revealFrom.width() / 2f) * f
                     roundedShape(revealPath, revealRect, r, FolderController.SQUIRCLE_V + (FolderController.CIRCLE_K - FolderController.SQUIRCLE_V) * f, FolderController.CIRCLE_K)
+                } else if (shape == com.oneuiclone.home.icons.IconShape.CIRCLE) {
+                    // a rounded rectangle is exactly a circle at the icon (one with half-side corners), so the
+                    // corners just ease from the icon's into the card's the whole way
+                    val r0 = revealFrom.width() * com.oneuiclone.home.icons.IconShape.corner(0f, shape)
+                    roundedShape(revealPath, revealRect, r0 + (dp.dp(28f) - r0) * f, FolderController.CIRCLE_K, FolderController.CIRCLE_K)
                 } else {
-                    // another icon shape: a rectangle rounding into the card's corners, cut to the shape growing out
-                    // from the icon until it holds the whole card
+                    // Square (iOS continuous corners), Cookie, Hexagon: a rectangle rounding into the card's corners, cut to the shape. The shape is
+                    // sized from the rectangle (as big at the icon, as big as holds it all by SHAPE_GONE), so it
+                    // eases out over the morph. (Sized from the icon, it stayed a near-square until the last
+                    // frames of a close and then snapped into the shape.)
                     roundedShape(revealPath, revealRect, dp.dp(28f) * f, FolderController.CIRCLE_K, FolderController.CIRCLE_K)
                     val grow = f / FolderController.SHAPE_GONE
                     if (grow < 1f) {
-                        val size = revealFrom.width() + (com.oneuiclone.home.icons.IconShape.cover(revealRect.width(), revealRect.height()) - revealFrom.width()) * grow
-                        com.oneuiclone.home.icons.IconShape.path(revealShape, revealRect.centerX(), revealRect.centerY(), size)
+                        // (the shape fills 98 of its 100 units; the plate draws it 100/98 bigger to fill the icon)
+                        val side = maxOf(revealRect.width(), revealRect.height()) * 100f / 98f
+                        val size = side + (com.oneuiclone.home.icons.IconShape.cover(side, side) - side) * grow
+                        com.oneuiclone.home.icons.IconShape.path(revealShape, revealRect.centerX(), revealRect.centerY(), size, shape)
                         revealPath.op(revealShape, android.graphics.Path.Op.INTERSECT)
                     }
                 }
                 outline.setPath(revealPath)
+                // the icon casts no shadow: the card's fades with the reveal (out over the last stretch of a close,
+                // in as it opens) instead of vanishing when the icon takes over
+                outline.alpha = minOf(cardLook, f / SHADOW_FADE)
             }
         }
         if (folderGlass == null && iconTint == null) {
@@ -666,11 +778,25 @@ class FolderPanel(
         out.close()
     }
 
-    /** Reveal progress [f] (0 = the icon, 1 = the whole card) and how much of the icon's colour covers the card. */
+    /** How much of the card's own look (frosted glass, background, shadow) shows under the icon's colour. */
+    private var cardLook = 1f
+    /** The card's shadow is whole from this far into the reveal; nearer the icon it fades out. */
+    private val SHADOW_FADE = 0.35f
+
+    /**
+     * Reveal progress [f] (0 = the icon, 1 = the whole card) and how much the card looks like the icon instead
+     * ([tint]): the icon's colour comes in as the card's glass, background and shadow go, so at 1 it's drawn as
+     * the icon is (its colour over Home) and the hand-over to the real icon doesn't jump.
+     */
     fun setReveal(f: Float, tint: Float) {
         reveal = f.coerceIn(0f, 1f)
+        iconTint?.let { t ->
+            t.alpha = tint
+            cardLook = 1f - tint
+            card?.background?.alpha = (255 * cardLook).toInt()
+            glass?.alpha = cardLook
+        }
         card?.invalidateOutline()
-        iconTint?.alpha = tint
     }
 
     /** The card shows the closed folder's glass instead of a snapshot of what's behind it. */
@@ -920,6 +1046,15 @@ class FolderPanel(
     }
 
     /** Final (unscaled) icon rect of [v] in panel/screen coordinates. */
+    /** The app cell at window point ([x], [y]) once the folder is open (the panel at rest fills the window). */
+    private fun iconAtRest(x: Int, y: Int): IconView? {
+        if (!trayRect.contains(x, y)) return null
+        val r = Rect()
+        return icons.firstOrNull { v ->
+            v !== placeholder && v.isShown && r.run { set(0, 0, v.width, v.height); offsetDescendantRectToMyCoords(v, this); contains(x, y) }
+        }
+    }
+
     fun iconRectInPanel(v: IconView): Rect {
         val r = Rect(v.iconLeft(), v.iconTop(), v.iconLeft() + dp.iconSizePx, v.iconTop() + dp.iconSizePx)
         offsetDescendantRectToMyCoords(v, r)
@@ -930,6 +1065,8 @@ class FolderPanel(
     fun contentAlpha(a: Float, iconsFlying: Boolean) {
         title.alpha = a; addBtn.alpha = a; settingBtn.alpha = a; indicator.alpha = a
         icons.forEach { if (it !== placeholder) it.labelAlpha = a }
+        // the apps that don't fly from the folder icon (past its preview: Pixel's fifth on) come and go with the rest
+        icons.forEach { if (it !== placeholder) it.iconAlpha = if (iconsFlying) a else 1f }
         if (!iconsFlying) icons.forEach { if (it !== placeholder) it.iconVisible = true }
     }
 
@@ -939,6 +1076,56 @@ class FolderPanel(
             context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
                 ?.hideSoftInputFromWindow(title.windowToken, 0)
         }
+    }
+
+    /** Closing: touches go to Home underneath. */
+    var passThrough = false
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
+        if (passThrough && ev.actionMasked == MotionEvent.ACTION_DOWN) false else super.dispatchTouchEvent(ev)
+
+    /**
+     * Set while the folder opens. A tap then goes to the app whose place it's on once open, and opens it on lift.
+     * Left to the views, the card grows on under the finger between down and up, the app slides out from under it
+     * and the click is cancelled (a quick tap on an app did nothing).
+     */
+    var opening = false
+    private var tapping = false
+    private var tapApp: IconView? = null
+    private var tapOutside = false
+    private var tapX = 0f
+    private var tapY = 0f
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
+    /**
+     * A touch while the folder opens, from the controller's full-screen catcher (the panel is scaled down then, and
+     * a view only gets touches inside its scaled bounds: a tap outside the small card went to Home underneath).
+     * False lets it through to the panel.
+     */
+    fun openingTouch(event: MotionEvent): Boolean {
+        // No double-tap guard on the folder icon's spot (0.196–0.200): the app that lands there (Drive in a pop-up
+        // clamped to the screen edge) is what a fast tapper aims at, and Launcher3 lets that tap through too.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && opening) {
+            tapping = true
+            tapX = event.rawX; tapY = event.rawY
+            tapApp = iconAtRest(tapX.toInt(), tapY.toInt())
+            tapOutside = !trayRect.contains(tapX.toInt(), tapY.toInt()) &&
+                !(!popup && tapY.toInt() in title.top..title.bottom)
+            return true
+        }
+        if (tapping) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> if (kotlin.math.hypot(event.rawX - tapX, event.rawY - tapY) > slop) { tapApp = null; tapOutside = false }
+                MotionEvent.ACTION_UP -> {
+                    tapping = false
+                    val app = tapApp
+                    tapApp = null
+                    if (app != null && app.isAttachedToWindow) app.performClick() else if (tapOutside) onDismiss()
+                }
+                MotionEvent.ACTION_CANCEL -> { tapping = false; tapApp = null }
+            }
+            return true
+        }
+        return false
     }
 
     @SuppressLint("ClickableViewAccessibility")

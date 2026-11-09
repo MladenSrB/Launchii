@@ -117,7 +117,7 @@ class QuickOpenPanel(
      * radius: a widget's icon.
      */
     class Origin(val bounds: android.graphics.Rect, val tile: Bitmap,
-                 val corner: Float = minOf(bounds.width(), bounds.height()) * com.oneuiclone.home.icons.IconShape.corner(ICON_CORNER)) {
+                 val corner: Float = minOf(bounds.width(), bounds.height()) * com.oneuiclone.home.icons.IconShape.corner(ICON_CORNER, com.oneuiclone.home.icons.IconShape.container)) {
         val aspect get() = if (bounds.height() > 0) bounds.width().toFloat() / bounds.height() else 1f
     }
 

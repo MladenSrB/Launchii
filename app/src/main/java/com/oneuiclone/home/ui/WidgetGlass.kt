@@ -41,17 +41,7 @@ class WidgetGlass {
         val gen = ++generation
         if (!available || w == 0 || h == 0 || io.isShutdown) { publish(gen, null, 1f); return }
         io.execute {
-            val out = try {
-                val small = Bitmap.createBitmap(max(1, w / WallpaperLayer.DOWNSCALE), max(1, h / WallpaperLayer.DOWNSCALE), Bitmap.Config.ARGB_8888)
-                val c = Canvas(small)
-                c.scale(small.width / w.toFloat(), small.height / h.toFloat())
-                if (!draw(c)) null else {
-                    val blurred = WallpaperBlur.boxBlur(small, LEVEL * w * 0.16f / WallpaperLayer.DOWNSCALE)
-                    Bitmap.createBitmap(blurred.width, blurred.height, Bitmap.Config.ARGB_8888).also {
-                        Canvas(it).drawBitmap(blurred, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(WallpaperLayer.curveMatrix()) })
-                    }
-                }
-            } catch (e: Exception) {
+            val out = try { blurred(w, h, draw) } catch (e: Exception) {
                 android.util.Log.w("OneUiHome", "widget glass failed", e)
                 null
             }
@@ -70,5 +60,20 @@ class WidgetGlass {
     companion object {
         /** Blur strength as a fraction of the Apps screen's full blur. */
         const val LEVEL = 0.6f
+
+        /**
+         * The glass for a [w]×[h] window whose wallpaper [draw] paints (false when it can't): quarter size, blurred
+         * and graded. Window pixels per bitmap pixel are w / its width.
+         */
+        fun blurred(w: Int, h: Int, draw: (Canvas) -> Boolean): Bitmap? {
+            val small = Bitmap.createBitmap(max(1, w / WallpaperLayer.DOWNSCALE), max(1, h / WallpaperLayer.DOWNSCALE), Bitmap.Config.ARGB_8888)
+            val c = Canvas(small)
+            c.scale(small.width / w.toFloat(), small.height / h.toFloat())
+            if (!draw(c)) return null
+            val blurred = WallpaperBlur.boxBlur(small, LEVEL * w * 0.16f / WallpaperLayer.DOWNSCALE)
+            return Bitmap.createBitmap(blurred.width, blurred.height, Bitmap.Config.ARGB_8888).also {
+                Canvas(it).drawBitmap(blurred, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(WallpaperLayer.curveMatrix()) })
+            }
+        }
     }
 }

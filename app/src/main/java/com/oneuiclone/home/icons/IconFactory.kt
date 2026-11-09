@@ -96,6 +96,21 @@ class IconFactory(private val context: Context) {
         const val LOOK_GROOVY = "groovy"
         /** The playful looks (the Zoom In card fills in around them: LaunchCard.PLAYFUL_FROM_ALPHA). */
         val PLAYFUL = setOf(LOOK_DOODLE, LOOK_SPRINKLES, LOOK_COMIC, LOOK_GROOVY)
+        /**
+         * Icon theme › Glass: each app's own icon with a subtle glass finish (soft light from above, a light rim, white
+         * parts fading into the plate); at night the symbol in the app's colour on a near-black plate. Modelled on iOS 26.
+         */
+        const val LOOK_IOS = "ios"
+        /** iOS Dark's plate, top to foot (measured), and its overall colour for the Zoom In card. */
+        private const val IOS_DARK_TOP = 0xFF333333.toInt()
+        private const val IOS_DARK_BOTTOM = 0xFF101010.toInt()
+        private const val IOS_DARK_PLATE = 0xFF222222.toInt()
+        /** The glass rim: white over the edge at the top, the sides and the foot, and the stroke's width (a share of the icon). */
+        private val IOS_RIM_LIGHT = floatArrayOf(0.52f, 0.33f, 0.15f)
+        private val IOS_RIM_DARK = floatArrayOf(0.16f, 0.07f, 0.05f)
+        private const val IOS_RIM_WIDTH = 0.028f
+        /** How opaque a white part of the symbol is at its foot (it's 1 at its top). */
+        private const val IOS_FADE = 0.5f
         private const val DOODLE_PAPER_LIGHT = 0xFFFFFAF0.toInt()
         private const val DOODLE_PAPER_DARK = 0xFF1E1D1B.toInt()
         private const val DOODLE_INK_LIGHT = 0xFF262421.toInt()
@@ -144,7 +159,17 @@ class IconFactory(private val context: Context) {
             LOOK_SPRINKLES -> if (night) SPRINKLES_PLATE_DARK else SPRINKLES_PLATE_LIGHT
             LOOK_COMIC -> COMIC_INK
             LOOK_GROOVY -> if (night) GROOVY_PLATE_DARK else GROOVY_PLATE_LIGHT
+            LOOK_IOS -> if (night) IOS_DARK_PLATE else Color.WHITE
             else -> if (night) PRISM_PLATE_DARK else PRISM_PLATE_LIGHT
+        }
+
+        /**
+         * The Zoom In card's start colour for a look, or null for the app's own splash colour (Glass in light mode keeps
+         * each app's own plate).
+         */
+        fun lookCard(look: String, night: Boolean): Int? = when {
+            look == LOOK_IOS && !night -> null
+            else -> lookPlate(look, night)
         }
 
         private val ONE_DOT = arrayOf(
@@ -232,6 +257,8 @@ class IconFactory(private val context: Context) {
             dark && isGame(pkg) -> normal
             // one odd icon must not take Home down with it (icons load at start, so a throw here crash-loops)
             dark -> runCatching { createDark(d, size) }.onFailure { android.util.Log.w("IconFactory", "Dark icon failed: $pkg", it) }.getOrNull() ?: normal
+            // Glass works from each app's own icon, so every app gets it, with a monochrome layer or not
+            themed && look == LOOK_IOS -> runCatching { createIos(d, size, lookNight(lookMode, night), pkg) }.onFailure { android.util.Log.w("IconFactory", "Glass icon failed: $pkg", it) }.getOrNull() ?: normal
             styled -> runCatching { createLook(d, size, lookNight(lookMode, night), look, hasMono, pkg?.hashCode() ?: 0) }.onFailure { android.util.Log.w("IconFactory", "$look icon failed: $pkg", it) }.getOrNull() ?: normal
             themed && minimal && hasMono -> createMinimal(d, size)
             themed && minimal && (themeAll || forced) -> createTonal(d, size, night, glyphOnly = true)
@@ -836,6 +863,20 @@ class IconFactory(private val context: Context) {
      * colour distance from the ring just inside the mask edge.
      */
     fun createDark(src: Drawable, size: Int): Bitmap? {
+        val work = darkGlyph(src, size) ?: return null
+        val layers = blank(size)
+        val lc = Canvas(layers)
+        lc.drawPaint(Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), DARK_TOP, DARK_BOTTOM, Shader.TileMode.CLAMP)
+        })
+        lc.drawBitmap(work, 0f, 0f, bitmapPaint)
+        work.recycle()
+        applyEmboss(lc, size)
+        return clip(layers, size)
+    }
+
+    /** [createDark]'s foreground, lifted off its background and recoloured for a dark plate; null when none separates. */
+    private fun darkGlyph(src: Drawable, size: Int): Bitmap? {
         val n = size * size
         val work = blank(size)
         val c = Canvas(work)
@@ -911,16 +952,166 @@ class IconFactory(private val context: Context) {
             fg[i] = (out and 0x00FFFFFF) or (a shl 24)
         }
         work.setPixels(fg, 0, size, 0, 0, size, size)
+        return work
+    }
 
+    /**
+     * Icon theme › Glass ([LOOK_IOS]): each app's own icon, its background layer lit from above (a touch lighter at
+     * the top, darker at the foot), its foreground on top with white parts fading to [IOS_FADE] at the foot (the plate
+     * shows through) over a faint shadow. Night ([night]): the foreground recoloured as for Dark icons ([darkGlyph]) on a
+     * #333→#111 plate, lit at its top, darker at its foot, over a crisp dark shadow. Both get a subtle glass rim and no
+     * One UI emboss. Games and legacy icons keep their own art under the rim. (Measured from Apple's iOS 26 image.)
+     */
+    fun createIos(src: Drawable, size: Int, night: Boolean, pkg: String?): Bitmap {
+        val s = size.toFloat()
         val layers = blank(size)
-        val lc = Canvas(layers)
-        lc.drawPaint(Paint().apply {
-            shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), DARK_TOP, DARK_BOTTOM, Shader.TileMode.CLAMP)
-        })
-        lc.drawBitmap(work, 0f, 0f, bitmapPaint)
-        work.recycle()
-        applyEmboss(lc, size)
+        val c = Canvas(layers)
+        val game = isGame(pkg)
+        if (pkg in CHROME) {
+            if (night) {
+                c.drawPaint(Paint().apply {
+                    shader = android.graphics.LinearGradient(0f, 0f, 0f, s, IOS_DARK_TOP, IOS_DARK_BOTTOM, Shader.TileMode.CLAMP)
+                })
+                drawChromeLogo(c, s / 2f, s / 2f, s * CHROME_LOGO_FRACTION / 2f)
+            } else {
+                // zoomed in, as Default draws it under the Circle shape: the logo is the whole icon, no white plate.
+                // It reaches the shape's farthest point, so the corners are logo too (the outer colours run past the edge)
+                drawChromeLogo(c, s / 2f, s / 2f, s * reach(IconShape.current))
+            }
+        } else if (night && !game) {
+            val glyph = darkGlyph(src, size)
+            if (glyph != null) {
+                c.drawPaint(Paint().apply {
+                    shader = android.graphics.LinearGradient(0f, 0f, 0f, s, IOS_DARK_TOP, IOS_DARK_BOTTOM, Shader.TileMode.CLAMP)
+                })
+                iosDarkGlyph(c, glyph, size)
+            } else ownIcon(c, src, size)
+        } else if (src is AdaptiveIconDrawable && !game) {
+            iosLayers(c, src, size)
+        } else ownIcon(c, src, size)
+        iosRim(c, size, if (night && !game) IOS_RIM_DARK else IOS_RIM_LIGHT, IOS_RIM_WIDTH)
         return clip(layers, size)
+    }
+
+    /** How far [shape]'s outline reaches from the icon's centre at its farthest, as a share of the icon (a hair over). */
+    private fun reach(shape: String): Float = reaches.getOrPut(shape) {
+        val m = android.graphics.PathMeasure(IconShape.path(100f, shape), true)
+        val pos = FloatArray(2)
+        var far = 0f
+        var d = 0f
+        while (d <= m.length) {
+            m.getPosTan(d, pos, null)
+            far = max(far, kotlin.math.hypot(pos[0] - 50f, pos[1] - 50f))
+            d += 0.5f
+        }
+        far / 100f + 0.005f
+    }
+    private val reaches = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
+    private fun ownIcon(c: Canvas, src: Drawable, size: Int) {
+        if (src is AdaptiveIconDrawable) drawAdaptive(c, src, size) else drawLegacy(c, src, size)
+    }
+
+    /** Glass in light mode: the background layer lit from above, the foreground's white parts fading toward its foot. */
+    private fun iosLayers(c: Canvas, d: AdaptiveIconDrawable, size: Int) {
+        val s = size.toFloat()
+        val inset = (size * 0.25f).roundToInt()
+        val bounds = Rect(-inset, -inset, size + inset, size + inset)
+        c.drawColor(Color.BLACK)
+        d.background?.let { it.bounds = bounds; it.draw(c) }
+        // measured on iOS's plates: about 10 % lighter at the top and 14 % darker at the foot than in the middle
+        c.drawPaint(Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, s, intArrayOf(0x1FFFFFFF, 0x00FFFFFF, 0x00000000, 0x24000000),
+                floatArrayOf(0f, 0.45f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        })
+        val fg = d.foreground ?: return
+        val glyph = blank(size)
+        fg.bounds = bounds
+        fg.draw(Canvas(glyph))
+        glassFade(glyph, IOS_FADE, whiteOnly = true)
+        softShadow(c, glyph, size, 0.14f)
+        c.drawBitmap(glyph, 0f, 0f, bitmapPaint)
+        glyph.recycle()
+    }
+
+    /** iOS Dark's symbol: lit about 18 % at its top, about 42 % darker at its foot, over a crisp dark shadow. Recycles [glyph]. */
+    private fun iosDarkGlyph(c: Canvas, glyph: Bitmap, size: Int) {
+        val box = opaqueBounds(glyph)
+        if (!box.isEmpty) Canvas(glyph).drawPaint(Paint().apply {
+            shader = android.graphics.LinearGradient(0f, box.top.toFloat(), 0f, box.bottom.toFloat(),
+                intArrayOf(0x2EFFFFFF, 0x00FFFFFF, 0x6B000000), floatArrayOf(0f, 0.42f, 1f), Shader.TileMode.CLAMP)
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+        })
+        val offset = IntArray(2)
+        val drop = glyph.extractAlpha(Paint().apply { maskFilter = blur(size * 0.007f) }, offset)
+        c.drawBitmap(drop, offset[0].toFloat(), offset[1] + size * 0.014f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            color = Color.BLACK; alpha = 191
+        })
+        drop.recycle()
+        c.drawBitmap(glyph, 0f, 0f, bitmapPaint)
+        glyph.recycle()
+    }
+
+    /** A faint soft shadow of [glyph] just under it, [alpha] black. */
+    private fun softShadow(c: Canvas, glyph: Bitmap, size: Int, alpha: Float) {
+        val offset = IntArray(2)
+        val drop = glyph.extractAlpha(Paint().apply { maskFilter = blur(size * 0.009f) }, offset)
+        c.drawBitmap(drop, offset[0].toFloat(), offset[1] + size * 0.007f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            color = Color.BLACK; this.alpha = (255 * alpha).roundToInt()
+        })
+        drop.recycle()
+    }
+
+    /**
+     * iOS's glass symbols: opaque at the top, [foot] opaque at the foot, so the plate (or the glass) shows through
+     * toward the bottom. [whiteOnly]: only white and near-white parts fade (a colourful logo keeps its colours solid).
+     */
+    private fun glassFade(glyph: Bitmap, foot: Float, whiteOnly: Boolean) {
+        val w = glyph.width
+        val h = glyph.height
+        val box = opaqueBounds(glyph)
+        if (box.height() < 2) return
+        val px = IntArray(w * h)
+        glyph.getPixels(px, 0, w, 0, 0, w, h)
+        val hsl = FloatArray(3)
+        for (y in box.top until box.bottom) {
+            val t = (y - box.top).toFloat() / (box.height() - 1)
+            for (x in 0 until w) {
+                val i = y * w + x
+                val p = px[i]
+                val a = p ushr 24
+                if (a == 0) continue
+                var k = t
+                if (whiteOnly) {
+                    androidx.core.graphics.ColorUtils.colorToHSL(p, hsl)
+                    k *= (1f - chroma(p) / 0.2f).coerceIn(0f, 1f) * smooth(0.62f, 0.9f, hsl[2])
+                }
+                if (k <= 0f) continue
+                px[i] = (p and 0x00FFFFFF) or ((a * (1f - (1f - foot) * k)).roundToInt().coerceIn(0, 255) shl 24)
+            }
+        }
+        glyph.setPixels(px, 0, w, 0, 0, w, h)
+    }
+
+    /**
+     * iOS's glass rim: white just inside the edge, about 1 pt, strongest at the top and faintest at the foot ([a]: top,
+     * sides, foot). Drawn on the shape's own edge; [clip] cuts away its outer half. Off with Icons › Icon contour.
+     */
+    private fun iosRim(c: Canvas, size: Int, a: FloatArray, width: Float) {
+        if (!iconShine) return
+        val s = size.toFloat()
+        fun white(x: Float) = ((x.coerceIn(0f, 1f) * 255).roundToInt() shl 24) or 0x00FFFFFF
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, s,
+                intArrayOf(white(a[0]), white((a[0] + a[1]) / 2f), white(a[1]), white(a[2])), floatArrayOf(0f, 0.22f, 0.5f, 1f),
+                Shader.TileMode.CLAMP)
+        }
+        val path = maskPath(s)
+        p.strokeWidth = s * width
+        c.drawPath(path, p)
+        p.strokeWidth = s * width * 0.5f
+        c.drawPath(path, p)
     }
 
     /**
@@ -928,17 +1119,20 @@ class IconFactory(private val context: Context) {
      * around it (kept white in dark mode, no night dim), or on the dark plate for Dark icons. Drawn here, not from
      * Chrome's icon: versions put the logo in different layers at different sizes (one overflows the mask), so
      * shrinking the real icon came out blank or as a square crop.
+     * Under the Circle shape the logo is the whole icon, as the Pixel Launcher shows it: no plate, no ring (a hair
+     * past the circle's 49 % radius, so the clip's edge is all logo).
      */
     private fun createChrome(size: Int, dark: Boolean): Bitmap {
         val layers = blank(size)
         val c = Canvas(layers)
+        val full = !dark && IconShape.current == IconShape.CIRCLE
         if (dark) c.drawPaint(Paint().apply {
             shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), DARK_TOP, DARK_BOTTOM, Shader.TileMode.CLAMP)
         }) else c.drawColor(Color.WHITE)
         val mid = size / 2f
-        val r = size * CHROME_LOGO_FRACTION / 2f
+        val r = if (full) size * 0.495f else size * CHROME_LOGO_FRACTION / 2f
         drawChromeLogo(c, mid, mid, r)
-        if (!dark) {
+        if (!dark && !full) {
             val w = size * 0.014f
             c.drawCircle(mid, mid, r + w / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE; strokeWidth = w; color = 0x2E000000

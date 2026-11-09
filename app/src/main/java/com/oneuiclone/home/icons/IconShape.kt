@@ -36,6 +36,12 @@ object IconShape {
 
     val isSquircle get() = current == SQUIRCLE
 
+    /** Icons › Keep folders and widgets squircle (Prefs.keepSquircle), kept in step by Prefs. */
+    @Volatile var keepSquircle = false
+
+    /** The shape of folders and Launchii's widget tiles: the icon shape, or the squircle when they keep it. */
+    val container get() = if (keepSquircle) SQUIRCLE else current
+
     fun name(id: String) = when (id) {
         CIRCLE -> "Circle"
         SQUARE -> "Square"
@@ -46,8 +52,23 @@ object IconShape {
 
     /** One UI 8.5's config_icon_mask (IconFactory.ONE_UI_MASK) redrawn to start at the top and run clockwise. */
     private const val SQUIRCLE_PATH = "M50,1C77.063,1,99,6.935,99,50C99,93.063,77.063,99,50,99C22.935,99,1,93.063,1,50C1,6.935,22.935,1,50,1z"
-    /** Square's corner radius, of the 100-unit box. */
-    private const val SQUARE_CORNER = 23f
+    /**
+     * Square is the iPhone's icon shape (iOS 26): a rounded square with Apple's continuous corners, the corner
+     * radius 7/27 of the side (as measured from iOS 26's icons; iOS 7–18 used about 22.4 %).
+     */
+    private const val SQUARE_CORNER = 98f * 7f / 27f
+    /**
+     * One continuous corner, in units of the radius: (back along the side coming in, along the side going out),
+     * the points of UIBezierPath(roundedRect:cornerRadius:)'s corner, made symmetric about the diagonal. The curve
+     * starts 1.52866 radii from the corner and its curvature builds up, so no kink shows where side meets corner.
+     */
+    private val IOS_CORNER = floatArrayOf(
+        1.52866f, 0f,                                                           // line to here
+        1.08849f, 0f, 0.86841f, 0f, 0.66993f, 0.06550f,                         // cubic
+        0.63149f, 0.07491f,                                                     // line
+        0.37282f, 0.16906f, 0.16906f, 0.37282f, 0.07491f, 0.63149f,             // cubic
+        0.06550f, 0.66993f,                                                     // line
+        0f, 0.86841f, 0f, 1.08849f, 0f, 1.52866f)                               // cubic
     /** Cookie: a superellipse this square, its sides pinched in by this much of its reach. */
     private const val COOKIE_N = 3.2
     private const val COOKIE_PINCH = 0.11
@@ -84,8 +105,10 @@ object IconShape {
     }
 
     /**
-     * A rounded rectangle's corner (a share of the icon's size) standing in for [id]: exact for Circle and Square,
-     * [squircle] (the caller's own approximation) for the rest, which a growing [path] clip shapes where it matters.
+     * A rounded rectangle's corner (a share of the icon's size) standing in for [id]: exact for Circle; for Square
+     * the plain rounded rectangle through the same corner point (its continuous corner's middle sits where a
+     * circular one of the same radius does); [squircle] (the caller's own approximation) for the rest. A growing
+     * [path] clip shapes them where it matters.
      */
     fun corner(squircle: Float, id: String = current) = when (id) {
         CIRCLE -> 0.5f
@@ -104,11 +127,21 @@ object IconShape {
 
     private fun roundedSquare() = Path().apply {
         val r = SQUARE_CORNER
+        val k = IOS_CORNER
         moveTo(50f, 1f)
-        lineTo(99f - r, 1f); arcTo(RectF(99f - 2 * r, 1f, 99f, 1f + 2 * r), -90f, 90f)
-        lineTo(99f, 99f - r); arcTo(RectF(99f - 2 * r, 99f - 2 * r, 99f, 99f), 0f, 90f)
-        lineTo(1f + r, 99f); arcTo(RectF(1f, 99f - 2 * r, 1f + 2 * r, 99f), 90f, 90f)
-        lineTo(1f, 1f + r); arcTo(RectF(1f, 1f, 1f + 2 * r, 1f + 2 * r), 180f, 90f)
+        // each corner: where it is, the way back along the side coming in, the way along the side going out
+        for (c in listOf(
+            floatArrayOf(99f, 1f, -1f, 0f, 0f, 1f), floatArrayOf(99f, 99f, 0f, -1f, -1f, 0f),
+            floatArrayOf(1f, 99f, 1f, 0f, 0f, -1f), floatArrayOf(1f, 1f, 0f, 1f, 1f, 0f))) {
+            fun x(i: Int) = c[0] + (k[i] * c[2] + k[i + 1] * c[4]) * r
+            fun y(i: Int) = c[1] + (k[i] * c[3] + k[i + 1] * c[5]) * r
+            lineTo(x(0), y(0))
+            cubicTo(x(2), y(2), x(4), y(4), x(6), y(6))
+            lineTo(x(8), y(8))
+            cubicTo(x(10), y(10), x(12), y(12), x(14), y(14))
+            lineTo(x(16), y(16))
+            cubicTo(x(18), y(18), x(20), y(20), x(22), y(22))
+        }
         close()
     }
 

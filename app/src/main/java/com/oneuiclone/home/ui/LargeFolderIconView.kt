@@ -17,6 +17,8 @@ class LargeFolderIconView(context: Context, dp: DeviceProfile) : FolderIconView(
 
     /** Container spans from the left edge of one icon to the right edge of the next column's icon. */
     override val iconSize: Int get() = dp.cellWidth + dp.iconSizePx
+    override val plateScale get() = 1f
+    override val layout get() = INSIDE
 
     var apps: List<Pair<Bitmap, Any>> = emptyList()
         set(v) { field = v; previews = v.map { it.first }; invalidate() }

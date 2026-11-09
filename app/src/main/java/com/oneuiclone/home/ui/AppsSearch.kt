@@ -9,9 +9,13 @@ import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Insets
 import android.graphics.RectF
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -26,6 +30,9 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
+import android.view.WindowInsetsAnimationControlListener
+import android.view.WindowInsetsAnimationController
+import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -42,7 +49,11 @@ import java.net.URLEncoder
 import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.math.roundToInt
 
 /**
@@ -62,6 +73,10 @@ import kotlin.math.roundToInt
  * swipe down anywhere goes back Home. The results fade and slide up together as the bar opens; while typing,
  * whatever changed just fades in. The result IME "go" opens is highlighted (Pixel launcher): the first app, else
  * contact, else the typed query on Google.
+ *
+ * From Home it opens by Lift-Off ([beginLift]): the launcher feeds it the finger's progress ([setLift]) and then a
+ * spring's, and the bar, the results (growing out of the bar from 92%, rising into focus) and the keyboard, which it
+ * holds through [requestImeControl], all follow; [endLift] settles it either way.
  */
 @SuppressLint("ViewConstructor")
 class AppsSearch(
@@ -163,6 +178,23 @@ class AppsSearch(
     private var kb = 0f
     private var kbTarget = 0f
     private var kbAnim: ValueAnimator? = null
+    /** Lift-Off is driving it ([setLift]); [lift] is where it is (0 = the Home pill, 1 = open). */
+    var isLifting = false; private set
+    private var lift = 0f
+    /** Results rise in (1) or drop in / rise away (−1). */
+    private var liftSign = 1f
+    /** The keyboard, held so it follows the finger; null until the IME hands it over (or never: it then comes up at the end). */
+    private var imeControl: WindowInsetsAnimationController? = null
+    private var imeCancel: CancellationSignal? = null
+    private var imeTries = 0
+    /** The bar's landing bounce ([bounceBar]): px above where it rests. */
+    private var barBounce = 0f
+    private var bounceAnim: ValueAnimator? = null
+    /** A keyboard handed over late eases onto the finger's height instead of jumping there. */
+    private var imeBlend = 1f
+    private var imeBlendAnim: ValueAnimator? = null
+    /** No blur on low-RAM (Go) phones. */
+    private val liftBlurs = !context.getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
     /** Keyboard inset on screen right now (every frame while it animates). */
     private var ime = 0
     private var imeAnimating = false
@@ -187,7 +219,8 @@ class AppsSearch(
         }
 
         override fun onStart(animation: WindowInsetsAnimation, bounds: WindowInsetsAnimation.Bounds): WindowInsetsAnimation.Bounds {
-            if (animation.isIme() && isOpen) {
+            // a held keyboard (Lift-Off) goes where the finger puts it, not to an end state
+            if (animation.isIme() && isOpen && !isLifting) {
                 // the hierarchy already holds the end state: the keyboard's exact final height
                 val end = rootWindowInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: bounds.upperBound.bottom
                 // showing: ease onto the exact height on the keyboard's own timing; hiding: ride it down
@@ -368,7 +401,7 @@ class AppsSearch(
 
     /** Typing: [v] is new, so it fades in (opening, the whole results area rises in instead). */
     private fun reveal(v: View) {
-        if (opening) return
+        if (opening || isLifting) return
         v.animate().cancel()
         v.alpha = 0f
         v.animate().alpha(1f).setDuration(FADE_MS).setInterpolator(Easing.BASIC).start()
@@ -706,9 +739,11 @@ class AppsSearch(
         if (!::origin.isInitialized) return
         val o = origin
         val r = o.rect
-        val h = lerp(r.height(), dp.searchBarHeight.toFloat(), f)
+        // Lift-Off: it reads as the bar early on (size and colour lead), while its height follows the finger
+        val g = if (isLifting) 1f - (1f - minOf(1f, f * 1.12f)).pow(2.2f) else f
+        val h = lerp(r.height(), dp.searchBarHeight.toFloat(), g)
         val margin = dp.dp(16f)
-        val w = lerp(r.width(), dp.widthPx - 2 * margin, f)
+        val w = lerp(r.width(), dp.widthPx - 2 * margin, g)
         val own = lerp(r.top, barTop(kb, dp.searchBarHeight.toFloat()), f)
         // whichever is higher: the bar's own motion, or the keyboard pushing it up (never behind the keyboard)
         val top = if (ime > 0) minOf(own, barTop(ime.toFloat(), h)) else own
@@ -717,24 +752,24 @@ class AppsSearch(
             lp.width = w.roundToInt(); lp.height = h.roundToInt()
             pill.layoutParams = lp
         }
-        pill.x = lerp(r.left, margin, f)
-        pill.y = top
+        pill.x = lerp(r.left, margin, g)
+        pill.y = top - barBounce
         pillBg.cornerRadius = h / 2f
-        pillBg.setColor(argb.evaluate(f, o.fill, colors.open) as Int)
-        pillBg.setStroke(dp.dpi(1f), argb.evaluate(f, o.stroke, colors.stroke) as Int)
+        pillBg.setColor(argb.evaluate(g, o.fill, colors.open) as Int)
+        pillBg.setStroke(dp.dpi(1f), argb.evaluate(g, o.stroke, colors.stroke) as Int)
         // the pill's own look at the start and end: its glass under the fill, and its ink fading into the bar's
         pillGlass = o.glass
-        val ink = argb.evaluate(f, o.ink ?: colors.hint, colors.hint) as Int
+        val ink = argb.evaluate(g, o.ink ?: colors.hint, colors.hint) as Int
         glyph.color = ink
         field.setHintTextColor(ink)
-        pill.elevation = lerp(o.elevation, dp.dp(8f), f)              // search_bar_elevation
-        val gs = lerp(o.glyphBox, openGlyphBox, f) / openGlyphBox
+        pill.elevation = lerp(o.elevation, dp.dp(8f), g)              // search_bar_elevation
+        val gs = lerp(o.glyphBox, openGlyphBox, g) / openGlyphBox
         glyph.scaleX = gs; glyph.scaleY = gs
-        glyph.translationX = lerp(o.glyphLeft, openGlyphLeft, f) - openGlyphLeft
-        val ts = lerp(o.textSizePx, openTextSize, f) / openTextSize
+        glyph.translationX = lerp(o.glyphLeft, openGlyphLeft, g) - openGlyphLeft
+        val ts = lerp(o.textSizePx, openTextSize, g) / openTextSize
         field.scaleX = ts; field.scaleY = ts
         field.pivotY = h / 2f
-        field.translationX = lerp(o.textStart, openTextStart, f) - openTextStart * ts
+        field.translationX = lerp(o.textStart, openTextStart, g) - openTextStart * ts
     }
 
     /** Results end just above where the bar settles. */
@@ -818,7 +853,7 @@ class AppsSearch(
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         // the window only now became the IME's target: ask again
-        if (hasWindowFocus && isOpen) askForKeyboard()
+        if (hasWindowFocus && isOpen && !isLifting) askForKeyboard()
     }
 
     /**
@@ -828,8 +863,18 @@ class AppsSearch(
      */
     fun close(to: Origin = origin, lift: Boolean = false) {
         if (!isOpen) return
-        isOpen = false
+        if (isLifting) dropLift()
         origin = to
+        shutDown()
+        content.animate().alpha(0f).translationY(if (lift) -dp.dp(OPEN_RISE_DP) else content.translationY).setDuration(150).start()
+        dissolveQuery()
+        animateTo(0f) { onClose() }
+    }
+
+    /** No longer open: pending work stops and the keyboard goes down. */
+    private fun shutDown() {
+        isOpen = false
+        bounceAnim?.cancel(); barBounce = 0f
         main.removeCallbacks(noKeyboard)
         main.removeCallbacks(keyboardRetry)
         pendingFetch?.let { main.removeCallbacks(it) }
@@ -837,13 +882,185 @@ class AppsSearch(
         net.shutdownNow()
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(field.windowToken, 0)
         field.isCursorVisible = false
-        content.animate().alpha(0f).translationY(if (lift) -dp.dp(OPEN_RISE_DP) else content.translationY).setDuration(150).start()
-        // the query dissolves into the hint, so the pill lands showing "Search" like the one it becomes
+    }
+
+    /** The query dissolves into the hint, so the pill lands showing "Search" like the one it becomes. */
+    private fun dissolveQuery() {
         if (field.length() > 0) field.animate().alpha(0f).setDuration(110).withEndAction {
             field.text = null
             field.animate().alpha(1f).setDuration(150).start()
         }.start()
-        animateTo(0f) { onClose() }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Lift-Off
+    // ---------------------------------------------------------------------------------------------
+
+    /** How far the bar rises in Lift-Off: from its pill to where it rests on the keyboard. */
+    val liftTravel get() = if (::origin.isInitialized) origin.rect.top - barTop(kb, dp.searchBarHeight.toFloat()) else 0f
+
+    /**
+     * Opens from Home's pill like [open], but nothing moves on its own: [setLift] places the bar, the results and the
+     * keyboard until [endLift]. [fromAbove]: a swipe down, so the results drop in instead of rising.
+     */
+    fun beginLift(from: Origin, fromAbove: Boolean = false) {
+        sources.snapshot.let { scores = it.scores; suggested = it.contacts }
+        anim?.cancel()
+        origin = from
+        isOpen = true
+        isLifting = true
+        liftSign = if (fromAbove) -1f else 1f
+        visibility = VISIBLE
+        kb = rememberedKeyboard(); kbTarget = kb
+        updateContentInset()
+        opening = true
+        filter("")
+        opening = false
+        content.animate().cancel()
+        setLift(0f)
+        field.isCursorVisible = true
+        field.requestFocus()
+        keyboardComing = false
+        imeTries = 0
+        // the IME only takes the field a frame or two after focus
+        main.post { requestImeControl() }
+    }
+
+    /** Lift-Off back to Home: [setLift] runs down to 0, then [endLift]. [away]: a swipe up closed it, so the results rise away. */
+    fun beginLiftClose(to: Origin, away: Boolean = false) {
+        if (!isOpen) return
+        anim?.cancel()
+        origin = to
+        shutDown()
+        isLifting = true
+        lift = f
+        if (away) liftSign = -1f
+        content.animate().cancel()
+        dissolveQuery()
+    }
+
+    /** Lift-Off at [p] (0 = Home's pill, 1 = open; a little over 1 while the finger pulls past the end). */
+    fun setLift(p: Float) {
+        if (!isLifting) return
+        lift = p
+        f = p.coerceIn(0f, 1f)
+        layoutPill()
+        // the results grow out of the bar from 92%, rise 38 dp (or drop) and come into focus over the last 90%
+        val q = Easing.SINE_IN_OUT_80.getInterpolation(((p - 0.1f) / 0.9f).coerceIn(0f, 1f))
+        content.pivotX = dp.widthPx / 2f
+        content.pivotY = barTop(kbTarget, dp.searchBarHeight.toFloat()) + dp.searchBarHeight / 2f - (content.layoutParams as LayoutParams).topMargin
+        val sc = 0.92f + 0.08f * q
+        content.scaleX = sc; content.scaleY = sc
+        content.translationY = dp.dp(LIFT_RISE_DP) * (1f - q) * liftSign
+        content.alpha = (q / 0.8f).coerceAtMost(1f)
+        val r = if (liftBlurs) dp.dp(LIFT_BLUR_DP) * (1f - q) else 0f
+        content.setRenderEffect(if (r < 0.5f) null else RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP))
+        steerKeyboard(p)
+    }
+
+    /** Lift-Off settled: [open] leaves search up (keyboard and all), otherwise it is gone and [onClose] runs. */
+    fun endLift(open: Boolean) {
+        if (!isLifting) return
+        if (open && isOpen) {
+            isLifting = false
+            clearLiftLook()
+            f = 1f; layoutPill()
+            imeBlendAnim?.cancel()
+            val c = imeControl
+            if (c != null) c.finish(true)
+            else { imeCancel?.cancel(); askForKeyboard() }          // never got hold of it: it comes up on its own
+            main.postDelayed(noKeyboard, 2500)
+            return
+        }
+        dropLift()
+        f = 0f; layoutPill()
+        if (isOpen) shutDown()
+        onClose()
+    }
+
+    /**
+     * The bar overshoots its resting place by [amount] px and settles: one damped wobble (peak after 60 ms, a dip
+     * of a fifth of it below, still by 0.5 s).
+     */
+    fun bounceBar(amount: Float) {
+        bounceAnim?.cancel()
+        if (amount < 0.5f || !isOpen) return
+        bounceAnim = ValueAnimator.ofFloat(0f, BOUNCE_S).apply {
+            duration = (BOUNCE_S * 1000).toLong()
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                barBounce = amount * exp(-t / BOUNCE_DECAY_S) * sin(2f * PI.toFloat() * t / BOUNCE_PERIOD_S) / BOUNCE_PEAK
+                layoutPill()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) { barBounce = 0f; layoutPill() }
+            })
+            start()
+        }
+    }
+
+    /** Lets go of a lift part-way (a held keyboard goes back down). */
+    private fun dropLift() {
+        isLifting = false
+        imeBlendAnim?.cancel()
+        clearLiftLook()
+        val c = imeControl
+        if (c != null) c.finish(false) else imeCancel?.cancel()
+    }
+
+    private fun clearLiftLook() {
+        content.setRenderEffect(null)
+        content.scaleX = 1f; content.scaleY = 1f; content.translationY = 0f; content.alpha = 1f
+    }
+
+    /**
+     * Takes hold of the keyboard so it follows the finger. The IME refuses until it serves the field (a frame or two
+     * after focus), so a refusal is retried for a while; without it the keyboard comes up by itself at [endLift].
+     */
+    private fun requestImeControl() {
+        if (!isLifting || !isOpen || imeControl != null || imeCancel != null) return
+        val wic = windowInsetsController ?: return
+        val cancel = CancellationSignal()
+        imeCancel = cancel
+        wic.controlWindowInsetsAnimation(WindowInsets.Type.ime(), -1L, LinearInterpolator(), cancel,
+            object : WindowInsetsAnimationControlListener {
+                override fun onReady(controller: WindowInsetsAnimationController, types: Int) {
+                    if (!isLifting) { controller.finish(isOpen); return }
+                    // no height to give it (not laid out yet, or a floating keyboard): let it come up by itself
+                    if (controller.shownStateInsets.bottom <= 0) { controller.finish(true); return }
+                    imeControl = controller
+                    keyboardComing = true
+                    retargetKeyboard(controller.shownStateInsets.bottom.toFloat())
+                    imeBlendAnim?.cancel()
+                    imeBlend = 0f
+                    imeBlendAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                        duration = if (lift < 0.1f) 0L else IME_BLEND_MS
+                        interpolator = Easing.IME
+                        addUpdateListener { imeBlend = it.animatedValue as Float; if (isLifting) steerKeyboard(lift) }
+                        start()
+                    }
+                }
+
+                override fun onFinished(controller: WindowInsetsAnimationController) {
+                    imeControl = null; imeCancel = null
+                }
+
+                override fun onCancelled(controller: WindowInsetsAnimationController?) {
+                    imeControl = null; imeCancel = null
+                    if (isLifting && isOpen && ++imeTries < IME_CONTROL_TRIES) main.postDelayed({ requestImeControl() }, 50)
+                }
+            })
+    }
+
+    /** The held keyboard rises over 5–60% of the lift, never over the bar (which rests 12 dp above it). */
+    private fun steerKeyboard(p: Float) {
+        val c = imeControl ?: return
+        val full = c.shownStateInsets.bottom.toFloat()
+        val t = ((p - 0.05f) / 0.55f).coerceIn(0f, 1f)
+        val room = dp.heightPx - (pill.y + pill.layoutParams.height) - dp.dp(12f)
+        val inset = minOf(full * t * t * (3 - 2 * t) * imeBlend, room).coerceIn(0f, full)
+        c.setInsetsAndAlpha(Insets.of(0, 0, 0, inset.roundToInt()), 1f, if (full > 0f) inset / full else 1f)
     }
 
     private fun animateTo(to: Float, end: (() -> Unit)? = null) {
@@ -881,6 +1098,17 @@ class AppsSearch(
         /** Results rising in with the bar (MORPH_MS); the Apps screen's grid comes in the same way after a swipe up. */
         const val OPEN_MS = 425L
         const val OPEN_RISE_DP = 48f
+        /** Lift-Off: how far the results rise into place, and how blurred they start. */
+        private const val LIFT_RISE_DP = 38f
+        private const val LIFT_BLUR_DP = 9f
+        /** Requests for the keyboard, 50 ms apart, before it is left to come up by itself. */
+        private const val IME_CONTROL_TRIES = 12
+        private const val IME_BLEND_MS = 180L
+        /** [bounceBar]'s wobble: e^(−t/decay)·sin(2πt/period), scaled so its first peak is the amount asked for. */
+        private const val BOUNCE_S = 0.5f
+        private const val BOUNCE_DECAY_S = 0.11f
+        private const val BOUNCE_PERIOD_S = 0.34f
+        private const val BOUNCE_PEAK = 0.519f
         private const val FADE_MS = 150L
         /** How long [askForKeyboard] keeps trying (the IME hand-over from an app has taken ~400 ms). */
         private const val KEYBOARD_RETRY_MS = 1500L

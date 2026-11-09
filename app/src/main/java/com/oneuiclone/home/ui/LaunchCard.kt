@@ -58,6 +58,12 @@ class LaunchCard(context: Context) : View(context) {
      */
     var fadeIn = false
 
+    /**
+     * The open was interrupted (Home came back before the app covered it): the card is shrinking back into its icon,
+     * the full icon fading back into Home's on the way, and taps go through to Home again.
+     */
+    var retracting = false
+
     /** Spring progress 0 → 1 (may overshoot a little). */
     var progress = 0f
         set(v) { field = v; invalidate() }
@@ -112,7 +118,8 @@ class LaunchCard(context: Context) : View(context) {
         val big = splashIcon
         // a dark icon stays itself while the card is still dark; the full icon fades in from then
         if (dark != null && pc < DARK_HOLD && big != null) splashIconAt = android.os.SystemClock.uptimeMillis()
-        val bigAlpha = if (big == null) 0f else ((android.os.SystemClock.uptimeMillis() - splashIconAt) / SWAP_MS.toFloat()).coerceIn(0f, 1f)
+        var bigAlpha = if (big == null) 0f else ((android.os.SystemClock.uptimeMillis() - splashIconAt) / SWAP_MS.toFloat()).coerceIn(0f, 1f)
+        if (retracting) bigAlpha = minOf(bigAlpha, ((pc - RETRACT_ICON_GONE) / RETRACT_ICON_TURN).coerceIn(0f, 1f))
         // the Home icon keeps its own squircle: the clip would cut through its light rim (stark on a dark themed
         // plate), leaving a stray arc along the top. It changes shape by fading into the full icon instead.
         icon?.let {
@@ -139,8 +146,8 @@ class LaunchCard(context: Context) : View(context) {
         canvas.restore()
     }
 
-    /** Covers Home until it's gone: taps mustn't reach the icons underneath. */
-    override fun onTouchEvent(event: MotionEvent) = true
+    /** Covers Home until it's gone: taps mustn't reach the icons underneath (they may again once it's shrinking back). */
+    override fun onTouchEvent(event: MotionEvent) = !retracting
 
     private fun lerp(a: Float, b: Float, f: Float) = a + (b - a) * f
 
@@ -150,6 +157,10 @@ class LaunchCard(context: Context) : View(context) {
         /** Corner radius of a Home icon as a fraction of its size; the card's clip morphs from it to a circle. */
         const val ICON_RADIUS = 0.3f
         private const val SWAP_MS = 120L
+        /** Shrinking back, the full icon has turned back into Home's by this much of the way... */
+        private const val RETRACT_ICON_GONE = 0.1f
+        /** ...over this much before it. */
+        private const val RETRACT_ICON_TURN = 0.4f
         /** With [fromShape], how far the card is along when the shape has grown past all of it. */
         private const val SHAPE_GONE = 0.4f
         /** With [fadeIn], the card is opaque from this much of the way. */

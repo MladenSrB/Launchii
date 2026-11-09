@@ -52,6 +52,9 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
         set(v) { field = v; invalidate() }
     var labelAlpha = 1f
         set(v) { field = v; invalidate() }
+    /** The icon's own fade (its label keeps [labelAlpha]), for apps that come into a folder without flying there. */
+    var iconAlpha = 1f
+        set(v) { if (field != v) { field = v; invalidate() } }
     /** Notification count (0 = none). [badgeNumber] false → dot. */
     var badgeCount = 0
         set(v) { if (field != v) { field = v; invalidate() } }
@@ -143,7 +146,12 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
     override fun onDraw(canvas: Canvas) {
         val top = iconTop()
         val left = iconLeft()
-        if (iconVisible) { drawIcon(canvas, left, top); drawBadge(canvas, left, top) }
+        if (iconVisible && iconAlpha > 0f) {
+            val faded = iconAlpha < 1f
+            if (faded) canvas.saveLayerAlpha(null, (255 * iconAlpha).toInt())
+            drawIcon(canvas, left, top); drawBadge(canvas, left, top)
+            if (faded) canvas.restore()
+        }
         if (showLabel && labelAlpha > 0f) {
             if (drawnLabel.isEmpty() && label.isNotEmpty()) fitLabel()
             val fm = textPaint.fontMetrics
@@ -209,16 +217,18 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
         val b = icon ?: return
         dst.set(left, top, left + iconSize, top + iconSize)
         if (folderBgScale > 1f) {
-            if (platePathSize != iconSize) { platePath = com.oneuiclone.home.icons.IconFactory.maskPath(iconSize.toFloat()); platePathSize = iconSize }
+            if (hoverPathSize != iconSize) { hoverPath = com.oneuiclone.home.icons.IconShape.path(iconSize.toFloat(), com.oneuiclone.home.icons.IconShape.container); hoverPathSize = iconSize }
             val grow = ((folderBgScale - 1f) / 0.1f).coerceAtMost(1f)       // fades in over the first tenth
             folderBgFill.alpha = (android.graphics.Color.alpha(FolderIconView.DEFAULT_BG) * grow).toInt()
             folderBgRim.alpha = (0x24 * grow).toInt()
             folderBgRim.strokeWidth = iconSize * 2.5f / 180f
             canvas.save()
             canvas.translate(left.toFloat(), top.toFloat())
-            canvas.scale(folderBgScale, folderBgScale, iconSize / 2f, iconSize / 2f)
-            canvas.drawPath(platePath!!, folderBgRim)
-            canvas.drawPath(platePath!!, folderBgFill)
+            // (the folder this makes: its plate, smaller when its apps poke out)
+            val s = folderBgScale * FolderIconView.popPlate
+            canvas.scale(s, s, iconSize / 2f, iconSize / 2f)
+            canvas.drawPath(hoverPath!!, folderBgRim)
+            canvas.drawPath(hoverPath!!, folderBgFill)
             canvas.restore()
         }
         plateGlass?.let { drawPlateGlass(canvas, it, left, top) }
@@ -245,6 +255,17 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
     private val plateAim = android.graphics.Matrix()
     private var platePath: android.graphics.Path? = null
     private var platePathSize = -1
+    // the folder plate shown while an app hovers (the folders' shape)
+    private var hoverPath: android.graphics.Path? = null
+    private var hoverPathSize = -1
+
+    /**
+     * A Launchii widget tile (Bubble, Split, an empty Bubbles widget), not an app: it takes the folders' and widgets'
+     * shape (Icons › Keep folders and widgets squircle).
+     */
+    var containerShape = false
+        set(v) { field = v; shaped.container = v; platePathSize = -1; invalidate() }
+    private val shapeId get() = if (containerShape) com.oneuiclone.home.icons.IconShape.container else com.oneuiclone.home.icons.IconShape.current
     private val plateMoved = android.view.ViewTreeObserver.OnPreDrawListener {
         plateToWindow.reset(); transformMatrixToGlobal(plateToWindow)
         if (plateToWindow != plateDrawnAt) invalidate()
@@ -283,7 +304,7 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
         }
         plateAim.setTranslate(x, y)
         if (plateGlassPaint.aim(g, plateAim)) {
-            if (platePathSize != iconSize) { platePath = com.oneuiclone.home.icons.IconFactory.maskPath(iconSize.toFloat()); platePathSize = iconSize }
+            if (platePathSize != iconSize) { platePath = com.oneuiclone.home.icons.IconShape.path(iconSize.toFloat(), shapeId); platePathSize = iconSize }
             plateGlassPaint.paint.alpha = 255
             c.drawPath(platePath!!, plateGlassPaint.paint)
         }
@@ -295,7 +316,7 @@ open class IconView(context: Context, protected val dp: DeviceProfile) : View(co
         plateDrawnAt.reset(); transformMatrixToGlobal(plateDrawnAt)
         plateAim.set(plateDrawnAt); plateAim.preTranslate(left.toFloat(), top.toFloat())
         if (!plateGlassPaint.aim(g, plateAim)) return
-        if (platePathSize != iconSize) { platePath = com.oneuiclone.home.icons.IconFactory.maskPath(iconSize.toFloat()); platePathSize = iconSize }
+        if (platePathSize != iconSize) { platePath = com.oneuiclone.home.icons.IconShape.path(iconSize.toFloat(), shapeId); platePathSize = iconSize }
         plateGlassPaint.paint.alpha = iconPaint.alpha
         canvas.save()
         canvas.translate(left.toFloat(), top.toFloat())

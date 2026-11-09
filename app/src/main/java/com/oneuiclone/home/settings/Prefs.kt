@@ -9,7 +9,10 @@ class Prefs(context: Context) {
 
     // whatever reads the settings first (Home, a widget, a settings page) sets the icon shape for this process
     init { com.oneuiclone.home.icons.IconShape.current = iconShape; com.oneuiclone.home.icons.IconFactory.comicBorder = comicBorder
-        com.oneuiclone.home.icons.IconFactory.iconShine = iconShine }
+        com.oneuiclone.home.icons.IconFactory.iconShine = iconShine
+        com.oneuiclone.home.ui.FolderIconView.style = folderIcons
+        com.oneuiclone.home.ui.FolderIconView.popupFolders = popupFolders
+        com.oneuiclone.home.icons.IconShape.keepSquircle = keepSquircle }
 
     var homeCols: Int get() = sp.getInt("home_cols", 4); set(v) = sp.edit().putInt("home_cols", v).apply()
     var homeRows: Int get() = sp.getInt("home_rows", 6); set(v) = sp.edit().putInt("home_rows", v).apply()
@@ -39,11 +42,14 @@ class Prefs(context: Context) {
     /** Minimal icons (Icon theme › Minimal): themed icons' white glyph alone, no plate (needs [themedIcons]). */
     var minimalIcons: Boolean get() = sp.getBoolean("minimal_icons", false); set(v) = sp.edit().putBoolean("minimal_icons", v).apply()
     /**
-     * Dot, Prism, Stencil, Satin, Doodle, Sprinkles, Comic or Groovy icons (Icon theme, IconFactory.LOOK_*): the themed glyph drawn in that
+     * Dot, Prism, Stencil, Satin, Doodle, Sprinkles, Comic, Groovy or Glass icons (Icon theme, IconFactory.LOOK_*): the themed glyph drawn in that
      * style on a plate of its own; empty for the other styles (needs [themedIcons]).
      */
-    var iconLook: String get() = sp.getString("icon_look", "") ?: ""; set(v) = sp.edit().putString("icon_look", v).apply()
-    /** Icons › Light or dark for Dot and Prism: IconFactory.MODE_AUTO (follow dark mode), MODE_LIGHT or MODE_DARK. */
+    var iconLook: String
+        // 0.203–0.204 had a Clear theme ("clear"), since removed: it becomes Glass
+        get() = (sp.getString("icon_look", "") ?: "").let { if (it == "clear") com.oneuiclone.home.icons.IconFactory.LOOK_IOS else it }
+        set(v) = sp.edit().putString("icon_look", v).apply()
+    /** Icons › Light or dark for the looks with both (Dot, Prism, the playful ones, Glass): IconFactory.MODE_AUTO (follow dark mode), MODE_LIGHT or MODE_DARK. */
     var iconMode: String get() = sp.getString("icon_mode", com.oneuiclone.home.icons.IconFactory.MODE_AUTO) ?: com.oneuiclone.home.icons.IconFactory.MODE_AUTO
         set(v) = sp.edit().putString("icon_mode", v).apply()
     /** Icons › Icon shape (IconShape.SQUIRCLE, CIRCLE, …). Setting it moves IconShape.current along with it. */
@@ -55,6 +61,18 @@ class Prefs(context: Context) {
     /** Icons › Icon contour: the icons' light rim and edge shading. Setting it moves IconFactory.iconShine along with it. */
     var iconShine: Boolean get() = sp.getBoolean("icon_shine", true)
         set(v) { sp.edit().putBoolean("icon_shine", v).apply(); com.oneuiclone.home.icons.IconFactory.iconShine = v }
+    /**
+     * Icons › Folder icons (round folders only): FolderIconView.INSIDE, OUTSIDE (the apps poke out past the edge) or
+     * PIXEL (four apps, as Pixel Launcher). 0.199 saved Outside as folder_pop_out. Setting it moves FolderIconView.style
+     * along with it.
+     */
+    var folderIcons: String
+        get() = sp.getString("folder_icons", null)
+            ?: if (sp.getBoolean("folder_pop_out", false)) com.oneuiclone.home.ui.FolderIconView.OUTSIDE else com.oneuiclone.home.ui.FolderIconView.INSIDE
+        set(v) { sp.edit().putString("folder_icons", v).remove("folder_pop_out").apply(); com.oneuiclone.home.ui.FolderIconView.style = v }
+    /** Icons › Keep folders and widgets squircle: they stay One UI's squircle whatever the icon shape. Setting it moves IconShape.keepSquircle along with it. */
+    var keepSquircle: Boolean get() = sp.getBoolean("keep_squircle", false)
+        set(v) { sp.edit().putBoolean("keep_squircle", v).apply(); com.oneuiclone.home.icons.IconShape.keepSquircle = v }
     /** Theme icons on the Apps screen and in search too, not just Home (needs [themedIcons]). */
     var themeAppsScreen: Boolean get() = sp.getBoolean("theme_apps_screen", false); set(v) = sp.edit().putBoolean("theme_apps_screen", v).apply()
     /**
@@ -68,7 +86,8 @@ class Prefs(context: Context) {
     /** Icons show the blurred wallpaper under them: glass icons' see-through plate, or Stencil's cut-out symbol. */
     val iconGlass: Boolean get() = iconPlateAlpha < 1f || (themedIcons && iconLook == com.oneuiclone.home.icons.IconFactory.LOOK_STENCIL)
     /** Good Lock Home Up "pop-up folder" style. */
-    var popupFolders: Boolean get() = sp.getBoolean("popup_folders", false); set(v) = sp.edit().putBoolean("popup_folders", v).apply()
+    var popupFolders: Boolean get() = sp.getBoolean("popup_folders", false)
+        set(v) { sp.edit().putBoolean("popup_folders", v).apply(); com.oneuiclone.home.ui.FolderIconView.popupFolders = v }
     /** "Bubble" in an app's quick options (see AppBubbles); off until the user turns it on. */
     var appBubbles: Boolean get() = sp.getBoolean("app_bubbles", false); set(v) = sp.edit().putBoolean("app_bubbles", v).apply()
     /** First-run setup (SetupActivity) has been shown; it opens by itself only once. */

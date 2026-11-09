@@ -58,6 +58,8 @@ open class PagedView(context: Context) : ViewGroup(context) {
     /** Long press on empty space (no child consumed the touch). */
     var onEmptyLongPress: ((Float, Float) -> Unit)? = null
     var onEmptyTap: ((Float, Float) -> Unit)? = null
+    /** Pages whose contents get no touches (page edit): a tap on them is an empty tap, a swipe still pages. */
+    var pageLocked: (View) -> Boolean = { false }
     private val longPressRunnable = Runnable { if (!isDragging) { longPressed = true; onEmptyLongPress?.invoke(downX, downY) } }
     private var longPressed = false
 
@@ -116,6 +118,9 @@ open class PagedView(context: Context) : ViewGroup(context) {
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
+                // page edit: icons and widgets on the shrunken pages never open (the "+" page stays tappable)
+                val page = getChildAt(((ev.x + scrollX) / step.coerceAtLeast(1)).toInt().coerceIn(0, childCount - 1))
+                if (pageLocked(page)) return true
             }
             MotionEvent.ACTION_MOVE -> {
                 obtainTracker().addMovement(ev)

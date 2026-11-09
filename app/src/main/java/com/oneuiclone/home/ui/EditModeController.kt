@@ -61,6 +61,7 @@ class EditModeController(
         ws.pivotX = dp.widthPx / 2f
         ws.pivotY = pivotY
         ws.pageSpacing = (dp.widthPx * 0.047f / targetScale).toInt()       // page_spacing_in_page_edit
+        ws.pageLocked = { it !is PlusPage }
         // "+" page
         plusPage = PlusPage(context, dp).also { p ->
             p.setOnClickListener { onAddPage(); exit() }
@@ -82,6 +83,7 @@ class EditModeController(
         isActive = false
         this.keepBackground = keepBackground
         val ws = workspace()
+        ws.pageLocked = { false }
         if (page >= 0) ws.snapToPage(page.coerceAtMost(ws.pageCount - 2))
         animateScale(1f, Springs.PAGE_EDIT_EXIT_STIFFNESS, Springs.PAGE_EDIT_EXIT_DAMPING) {
             plusPage?.let { ws.removeView(it) }; plusPage = null
@@ -137,6 +139,8 @@ class EditModeController(
                 // HideHotseatAlpha: 150 ms linear
                 val chrome = if (entering) 1f - (ms / 150f).coerceIn(0f, 1f) else (ms / 150f).coerceIn(0f, 1f)
                 hotseat().alpha = chrome
+                // faded out is not enough: the dock sits under the panel's buttons and would still open apps
+                hotseat().visibility = if (chrome > 0f) View.VISIBLE else View.INVISIBLE
                 val buttons = homeButtons()
                 for (b in buttons) {
                     b.alpha = chrome
@@ -175,6 +179,7 @@ class EditModeController(
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding((dp.widthPx * 0.04f).toInt(), (dp.heightPx * 0.021f).toInt(), (dp.widthPx * 0.04f).toInt(), 0)
             visibility = View.INVISIBLE
+            isClickable = true                                              // taps between buttons stop here
         }
         for ((label, action) in buttons) {
             val b = LinearLayout(context).apply {
@@ -232,6 +237,8 @@ class EditModeController(
         headers?.let { homeLayer.removeView(it) }
         headers = null
         isActive = false
+        workspace().pageLocked = { false }
+        hotseat().visibility = View.VISIBLE
     }
 
     /**

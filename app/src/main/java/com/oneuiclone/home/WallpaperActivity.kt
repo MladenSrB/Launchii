@@ -3,6 +3,7 @@ package com.oneuiclone.home
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.WallpaperColors
 import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
@@ -32,6 +33,8 @@ import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
 import com.oneuiclone.home.motion.Easing
+import com.oneuiclone.home.settings.Prefs
+import com.oneuiclone.home.settings.StylePreview
 import com.oneuiclone.home.ui.Fonts
 import com.oneuiclone.home.ui.WallpaperLayer
 import java.util.concurrent.Executors
@@ -46,7 +49,8 @@ import kotlin.math.roundToInt
  *
  * The photo fills the screen and is panned / pinched into place; the visible part is set at exactly the display
  * size, so the system has nothing left to crop or parallax and Home keeps a pixel-identical copy for its blur and
- * open / close zoom ([WallpaperLayer.setDisplayBitmap]).
+ * open / close zoom ([WallpaperLayer.setDisplayBitmap]). Home's first page sits on top, as it will look, so the
+ * photo can be placed around the icons; a button hides it.
  */
 class WallpaperActivity : Activity() {
 
@@ -58,6 +62,8 @@ class WallpaperActivity : Activity() {
         /** Photos can be pinched up to this far past filling the screen. */
         const val MAX_ZOOM = 4f
         private const val HINT_MS = 2600L
+        /** After a pan or pinch stops, Home's glass and label colour follow the new framing this much later. */
+        private const val SETTLE_MS = 150L
     }
 
     private val io = Executors.newSingleThreadExecutor()
@@ -69,6 +75,12 @@ class WallpaperActivity : Activity() {
     private lateinit var controls: FrameLayout
     private lateinit var hint: TextView
     private lateinit var apply: TextView
+    private lateinit var homeLayer: FrameLayout
+    private lateinit var homeToggle: GlyphButton
+    private var preview: StylePreview? = null
+    private val look by lazy { StylePreview.Look.of(Prefs(this)) }
+    /** Home's labels and dots are dark ([StylePreview.homeView]): the photo as framed takes dark text. */
+    private var bright: Boolean? = null
     private var sheet: Sheet? = null
     private var busy = false
 
@@ -80,17 +92,19 @@ class WallpaperActivity : Activity() {
         if (uri == null) { finish(); return }
 
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        crop = CropView(this).apply { alpha = 0f; onTap = { toggleControls() } }
+        crop = CropView(this).apply { alpha = 0f; onTap = { toggleControls() }; onSettled = { settled() } }
         root.addView(crop, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Home on top; it never takes touches, so drags and pinches reach the photo through it
+        homeLayer = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(ev: MotionEvent) = false
+        }.apply { alpha = 0f; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS }
+        root.addView(homeLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         controls = FrameLayout(this)
         // scrims so the white controls read over bright photos
         controls.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x66000000, 0))
         }, FrameLayout.LayoutParams(MATCH_PARENT, dp(140f), Gravity.TOP))
-        controls.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0x80000000.toInt(), 0))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, dp(200f), Gravity.BOTTOM))
 
         val close = GlyphButton(this, GlyphButton.CLOSE).apply {
             background = pill(0x59000000, 0x33FFFFFF)
@@ -98,6 +112,17 @@ class WallpaperActivity : Activity() {
             setOnClickListener { cancel() }
         }
         controls.addView(close, FrameLayout.LayoutParams(dp(44f), dp(44f), Gravity.TOP or Gravity.START))
+
+        // Home toggle and Set wallpaper top right, so nothing covers Home's dock
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        homeToggle = GlyphButton(this, GlyphButton.HOME).apply {
+            background = pill(0x59000000, 0x33FFFFFF)
+            contentDescription = "Hide Home screen"
+            visibility = View.INVISIBLE
+            setOnClickListener { toggleHome() }
+        }
+        actions.addView(homeToggle, LinearLayout.LayoutParams(dp(44f), dp(44f)).apply { marginEnd = dp(8f) })
+        controls.addView(actions, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.END))
 
         hint = TextView(this).apply {
             text = "Pinch and drag to adjust"
@@ -113,21 +138,22 @@ class WallpaperActivity : Activity() {
         apply = TextView(this).apply {
             text = "Set wallpaper"
             setTextColor(Color.BLACK)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = Fonts.ui(this@WallpaperActivity, 600)
             gravity = Gravity.CENTER
+            setPadding(dp(20f), 0, dp(20f), 0)
             background = pill(Color.WHITE, 0x22000000)
             isEnabled = false
             setOnClickListener { showSheet() }
         }
-        controls.addView(apply, FrameLayout.LayoutParams(MATCH_PARENT, dp(56f), Gravity.BOTTOM))
+        actions.addView(apply, LinearLayout.LayoutParams(WRAP_CONTENT, dp(44f)))
         root.addView(controls, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             (close.layoutParams as FrameLayout.LayoutParams).setMargins(dp(16f), bars.top + dp(12f), 0, 0)
-            (hint.layoutParams as FrameLayout.LayoutParams).topMargin = bars.top + dp(16f)
-            (apply.layoutParams as FrameLayout.LayoutParams).setMargins(dp(24f), 0, dp(24f), bars.bottom + dp(24f))
+            (actions.layoutParams as FrameLayout.LayoutParams).setMargins(0, bars.top + dp(12f), dp(16f), 0)
+            (hint.layoutParams as FrameLayout.LayoutParams).topMargin = bars.top + dp(68f)
             controls.requestLayout()
             sheet?.inset(bars.bottom)
             insets
@@ -143,6 +169,8 @@ class WallpaperActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         io.shutdown()
+        crop.removeCallbacks(settle)
+        preview?.destroy()
     }
 
     /** Decodes no larger than [MAX_ZOOM] needs, so a 200 MP photo doesn't take the whole heap. */
@@ -170,11 +198,63 @@ class WallpaperActivity : Activity() {
                 crop.scaleX = 1.04f; crop.scaleY = 1.04f
                 crop.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(350).setInterpolator(Easing.STANDARD).start()
                 apply.isEnabled = true
+                loadHome()
                 hint.animate().alpha(1f).setDuration(200).setStartDelay(250).withEndAction {
                     hint.animate().alpha(0f).setDuration(300).setStartDelay(HINT_MS).start()
                 }.start()
             }
         }
+    }
+
+    /** Reads Home's first page (as Wallpaper and style's preview does) and lays it over the photo. */
+    private fun loadHome() {
+        val p = StylePreview(this)
+        preview = p
+        p.load { settled() }
+    }
+
+    private val settle = Runnable { refreshHome() }
+
+    /** The photo stopped moving: Home follows the new framing a moment later. */
+    private fun settled() {
+        crop.removeCallbacks(settle)
+        crop.postDelayed(settle, SETTLE_MS)
+    }
+
+    /**
+     * Frosted plates, folders and the search pill blur the photo as framed now, and labels turn dark on a light
+     * part (Home goes by the colours of the wallpaper as set); Home is rebuilt only when that changes.
+     */
+    private fun refreshHome() {
+        val p = preview ?: return
+        if (crop.bitmap == null || isDestroyed) return
+        val full = crop.render(p.width, p.height)
+        p.rebuildGlass(full)
+        io.execute {
+            val small = Bitmap.createScaledBitmap(full, max(1, full.width / 8), max(1, full.height / 8), true)
+            val light = (WallpaperColors.fromBitmap(small).colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0
+            runOnUiThread {
+                if (isDestroyed || light == bright) return@runOnUiThread
+                bright = light
+                p.homeView(look, light) { v ->
+                    homeLayer.removeAllViews()
+                    homeLayer.addView(v, FrameLayout.LayoutParams(p.width, p.height))
+                    if (homeToggle.visibility != View.VISIBLE) {
+                        homeToggle.visibility = View.VISIBLE
+                        homeLayer.animate().alpha(1f).setDuration(250).setInterpolator(Easing.STANDARD).start()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Home over the photo, or the photo alone. */
+    private fun toggleHome() {
+        val show = homeLayer.alpha < 0.5f
+        homeLayer.animate().cancel()
+        homeLayer.animate().alpha(if (show) 1f else 0f).setDuration(200).setInterpolator(Easing.STANDARD).start()
+        homeToggle.on = show
+        homeToggle.contentDescription = if (show) "Hide Home screen" else "Show Home screen"
     }
 
     /** Portrait size of the whole display, as the wallpaper is drawn (behind the system bars and cutout). */
@@ -413,6 +493,9 @@ class WallpaperActivity : Activity() {
         companion object { const val CLOSE = 0; const val HOME = 1; const val LOCK = 2; const val BOTH = 3 }
         var color = Color.WHITE
             set(v) { field = v; invalidate() }
+        /** Off: struck through (Home hidden). */
+        var on = true
+            set(v) { field = v; invalidate() }
         private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         }
@@ -429,6 +512,10 @@ class WallpaperActivity : Activity() {
                 }
                 BOTH -> { phone(c, cx - 4.5f * d, cy, HOME, 0.7f); phone(c, cx + 4.5f * d, cy, LOCK, 0.7f) }
                 else -> phone(c, cx, cy, glyph, 1f)
+            }
+            if (!on) {
+                val r = 9f * d
+                c.drawLine(cx - r, cy - r, cx + r, cy + r, p)
             }
         }
 
@@ -458,6 +545,8 @@ class WallpaperActivity : Activity() {
         var bitmap: Bitmap? = null
             set(v) { field = v; reset() }
         var onTap: (() -> Unit)? = null
+        /** A drag, pinch or double-tap zoom has finished. */
+        var onSettled: (() -> Unit)? = null
 
         private var scale = 1f
         private var minScale = 1f
@@ -517,6 +606,9 @@ class WallpaperActivity : Activity() {
                 duration = 300
                 interpolator = Easing.STANDARD
                 addUpdateListener { zoomTo(it.animatedValue as Float, fx, fy) }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) { onSettled?.invoke() }
+                })
                 start()
             }
         }
@@ -532,6 +624,7 @@ class WallpaperActivity : Activity() {
             if (bitmap == null) return false
             pinch.onTouchEvent(e)
             if (!pinch.isInProgress) gestures.onTouchEvent(e)
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) onSettled?.invoke()
             return true
         }
 

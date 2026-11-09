@@ -23,13 +23,16 @@ class ShapedIcon {
     private var path: Path? = null
     private var pathSize = -1f
     private var pathShape = ""
+    /** A Launchii widget tile, not an app: cut to the folders' and widgets' shape ([IconShape.container]). */
+    var container = false
 
     /** [b] into [dst] (a square) with [paint]'s alpha and filters, cut to the current icon shape. */
     fun draw(canvas: Canvas, b: Bitmap, dst: RectF, paint: Paint) {
         val s = dst.width()
         if (s <= 0f || b.isRecycled) return
-        if (s != pathSize || pathShape != IconShape.current) {
-            path = IconFactory.maskPath(s); pathSize = s; pathShape = IconShape.current
+        val shape = if (container) IconShape.container else IconShape.current
+        if (s != pathSize || pathShape != shape) {
+            path = IconShape.path(s, shape); pathSize = s; pathShape = shape
         }
         val shader = shaders.getOrPut(b) { BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
         matrix.setScale(s / b.width, s / b.height)

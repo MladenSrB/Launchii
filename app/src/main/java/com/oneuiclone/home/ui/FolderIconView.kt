@@ -10,6 +10,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import com.oneuiclone.home.device.DeviceProfile
 import com.oneuiclone.home.icons.IconFactory
+import com.oneuiclone.home.icons.IconShape
 
 /**
  * One UI folder icon (FolderIconSupplier): squircle container (#99FCFCFF default, 1.7 % inset, faint dark
@@ -24,7 +25,55 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         const val GRID = 3
         const val SIZE_RATIO = 0.21f
         const val GAP_RATIO = 0.04f
+
+        /** Icons › Folder icons: the apps in the plate, poking out past its edge, or four as on Pixel Launcher. */
+        const val INSIDE = "inside"
+        const val OUTSIDE = "outside"
+        const val PIXEL = "pixel"
+        /** Prefs.folderIcons, kept in step by Prefs. Only for round folders (IconShape.container is Circle). */
+        @Volatile var style = INSIDE
+        /** The style in use: Inside unless folders are round. */
+        val shown get() = if (IconShape.container == IconShape.CIRCLE) style else INSIDE
+        /** Outside: the plate is this much of the usual one, and the apps poke out past it. */
+        const val POP_PLATE = 0.92f
+        /** The plate's share of the usual one: smaller when the apps poke out (Pixel's is a round app icon's size). */
+        val popPlate get() = if (shown == OUTSIDE) POP_PLATE else 1f
+        /** Pixel: apps 5 and up show only inside (Launcher3's MAX_NUM_ITEMS_IN_PREVIEW). */
+        const val PIXEL_SLOTS = 4
+        /** Pixel's app icons as a share of the plate: three or fewer, four (Launcher3's are 0.42 and 0.36). */
+        const val PIXEL_SIZE_FEW = 0.46f
+        const val PIXEL_SIZE_FOUR = 0.40f
+        /** Prefs.popupFolders, kept in step by Prefs: which grid the folder opens in (Pixel's preview shows its top left). */
+        @Volatile var popupFolders = false
+
+        /** The open folder's columns for [count] apps: the pop-up's near-square grid, or the full folder's. */
+        fun folderColumns(count: Int) = if (popupFolders) FolderController.popupGrid(count).first else FolderController.COLS
+
+        /**
+         * Pixel: the folder positions (ranks) the four preview slots show, top-left, top-right, bottom-left, bottom-right:
+         * the 2×2 at the open folder's top left, so the preview matches where the apps are inside. Three or fewer show in
+         * order; four in order too (rearranged into 2×2 only when the folder's grid doesn't already have them so).
+         */
+        fun pixelRanks(count: Int): List<Int> {
+            if (count <= 4) return (0 until minOf(count, PIXEL_SLOTS)).toList()
+            val cols = folderColumns(count)
+            return if (cols >= 2 && cols + 1 < count) listOf(0, 1, cols, cols + 1) else listOf(0, 1, 2, 3)
+        }
     }
+
+    /** This icon's plate, as a share of the usual one ([popPlate]; a large folder keeps its own layout). */
+    open val plateScale get() = popPlate
+    /** This icon's layout ([shown]; a large folder keeps its own). */
+    protected open val layout get() = shown
+    /** How many apps the preview shows. */
+    open val previewSlots get() = if (layout == PIXEL) PIXEL_SLOTS else GRID * GRID
+
+    /** The folder position (rank) preview slot [slot] shows: the same, but for Pixel ([pixelRanks]). */
+    fun rankInSlot(slot: Int): Int = if (layout == PIXEL) pixelRanks(previews.size).getOrElse(slot) { slot } else slot
+
+    /** The preview slot the app at folder position [rank] shows in, or -1 if it isn't in the preview. */
+    fun slotOfRank(rank: Int): Int = if (layout == PIXEL) pixelRanks(previews.size).indexOf(rank)
+        else if (rank < previewSlots) rank else -1
 
     var previews: List<Bitmap> = emptyList()
         set(v) { field = v; invalidate() }
@@ -91,7 +140,7 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         val inset = iconSize * 3f / 180f
         val inner = iconSize - inset * 2
         shape.reset()
-        IconFactory.maskPath(100f).transform(Matrix().apply {
+        IconShape.path(100f, IconShape.container).transform(Matrix().apply {
             setScale(inner / 100f * 1.02f, inner / 100f * 1.02f)
             postTranslate(inset - inner * 0.01f, inset - inner * 0.01f)
         }, shape)
@@ -104,7 +153,7 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
      */
     protected fun drawContainer(canvas: Canvas, left: Int, top: Int) {
         canvas.save()
-        canvas.scale(folderBgScale, folderBgScale, iconSize / 2f, iconSize / 2f)
+        canvas.scale(folderBgScale * plateScale, folderBgScale * plateScale, iconSize / 2f, iconSize / 2f)
         rimPaint.alpha = (0x24 * containerAlpha).toInt()
         canvas.drawPath(shape, rimPaint)
         drawnAt.reset(); transformMatrixToGlobal(drawnAt)
@@ -120,6 +169,10 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
 
     /** Position of preview child [rank] relative to icon top-left. */
     open fun childRect(rank: Int, out: RectF) {
+        when (layout) {
+            OUTSIDE -> { poppedRect(rank, out); return }
+            PIXEL -> { pixelRect(rank, out); return }
+        }
         val f = iconSize.toFloat()
         val gap = GAP_RATIO * f
         val size = SIZE_RATIO * f
@@ -130,6 +183,48 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         out.set(x, y, x + size, y + size)
     }
 
+    /**
+     * Outside: centred rows on a pitch in the plate's size, the icons big enough that the outer ones poke out past
+     * the circle (two: side by side, bigger, as on Pixel; four at most: 2×2; five or six: 3×2; up to nine: 3×3). A
+     * short last row is centred.
+     */
+    private fun poppedRect(rank: Int, out: RectF) {
+        val n = previews.size.coerceIn(1, GRID * GRID)
+        val cols = if (n <= 4) 2 else 3
+        val pitch = when { n <= 2 -> 0.6f; n <= 4 -> 0.508f; n <= 6 -> 0.34f; else -> 0.295f }
+        val size = when { n <= 2 -> 0.42f; n <= 4 -> 0.36f; n <= 6 -> 0.31f; else -> 0.27f }
+        // the plate's side: the mask inset 3/180 each side (see ensureShape), at plateScale
+        val plate = iconSize * (1f - 6f / 180f) * plateScale
+        val rows = (n + cols - 1) / cols
+        val r = rank / cols
+        val inRow = if (r == rows - 1) n - r * cols else cols
+        val cx = iconSize / 2f + (rank % cols - (inRow - 1) / 2f) * pitch * plate
+        val cy = iconSize / 2f + (r - (rows - 1) / 2f) * pitch * plate
+        val h = size * plate / 2f
+        out.set(cx - h, cy - h, cx + h, cy + h)
+    }
+
+    /**
+     * Pixel: Launcher3's ClippedFolderIconLayoutRule on the plate. Up to four apps on a circle 1.15× the plate
+     * (widened up to 25 % for four), from the left (two), the top (three) or the top-left (four), clockwise, four in
+     * reading order; a little bigger than Launcher3's (the user's choice): 0.46 of the plate for three or fewer, 0.40
+     * for four. One app sits in the middle.
+     */
+    private fun pixelRect(rank: Int, out: RectF) {
+        val n = previews.size.coerceIn(1, PIXEL_SLOTS)
+        val plate = iconSize * (1f - 6f / 180f) * plateScale
+        val size = (if (n <= 3) PIXEL_SIZE_FEW else PIXEL_SIZE_FOUR) * plate
+        val c = iconSize / 2f
+        if (n == 1) { out.set(c - size / 2f, c - size / 2f, c + size / 2f, c + size / 2f); return }
+        val radius = 1.15f / 2f * (1f + 0.25f * (n - 2) / 2f)
+        val theta0 = Math.PI - when (n) { 3 -> Math.PI / 2; 4 -> Math.PI / 4; else -> 0.0 }
+        val i = if (n == 4 && rank == 2) 3 else if (n == 4 && rank == 3) 2 else rank
+        val theta = theta0 - i * 2 * Math.PI / n
+        val x = c + (radius * Math.cos(theta) / 2f).toFloat() * plate
+        val y = c - (radius * Math.sin(theta) / 2f).toFloat() * plate
+        out.set(x - size / 2f, y - size / 2f, x + size / 2f, y + size / 2f)
+    }
+
     override fun drawIcon(canvas: Canvas, left: Int, top: Int) {
         ensureShape()
         canvas.save()
@@ -137,8 +232,9 @@ open class FolderIconView(context: Context, dp: DeviceProfile) : IconView(contex
         if (containerAlpha > 0f) drawContainer(canvas, left, top)
         if (previewAlpha > 0f) {
             bmpPaint.alpha = (255 * previewAlpha).toInt()
-            previews.take(GRID * GRID).forEachIndexed { i, b ->
-                if (i in hiddenPreviews) return@forEachIndexed
+            for (i in 0 until minOf(previewSlots, previews.size)) {
+                if (i in hiddenPreviews) continue
+                val b = previews.getOrNull(rankInSlot(i)) ?: continue
                 childRect(i, dst)
                 shaped.draw(canvas, b, dst, bmpPaint)
             }

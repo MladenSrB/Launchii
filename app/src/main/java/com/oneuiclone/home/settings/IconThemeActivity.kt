@@ -23,8 +23,9 @@ class IconThemeActivity : OneUiPage() {
         // 7 Stencil: the themed glyph cut out of a black plate, the wallpaper showing through frosted.
         // 8 Satin: the themed glyph in white, faintly shaded, on a matte black plate.
         // 9–12 Doodle, Sprinkles, Comic, Groovy: the playful looks (IconFactory.LOOK_*).
+        // 13 Glass: each app's own icon with a subtle glass finish, light or dark.
         val STYLES = listOf("Default", "Themed", "Frosted", "Dark", "Minimal", "Dot", "Prism", "Stencil", "Satin",
-            "Doodle", "Sprinkles", "Comic", "Groovy")
+            "Doodle", "Sprinkles", "Comic", "Groovy", "Glass")
         val SUMMARIES = listOf(
             "Each app's own icon",
             "Your colour palette on app icons",
@@ -39,15 +40,20 @@ class IconThemeActivity : OneUiPage() {
             "Pastel frosting with rainbow sprinkles",
             "Pop-art halftone with bold black ink",
             "70s outlines in warm stripes",
+            "Each app's own icon with a subtle glass effect. Dark plates in dark mode",
         )
         /** The Icon theme page's groups, in order, and the styles in each. */
-        val GROUPS = listOf("Simple" to 0..4, "Stylish" to 5..8, "Playful" to 9..12)
-        private val THEMED = setOf(1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12)
-        /** The styles with a light and a dark version (Dot, Prism and the playful ones), which get Light or dark. */
-        private val LIGHT_AND_DARK = setOf(5, 6, 9, 10, 11, 12)
+        val GROUPS = listOf("Simple" to listOf(0, 1, 2, 3, 4, 13), "Stylish" to (5..8).toList(), "Playful" to (9..12).toList())
+        private val THEMED = setOf(1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+        /** The styles with a light and a dark version (Dot, Prism, the playful ones and Glass), which get Light or dark. */
+        private val LIGHT_AND_DARK = setOf(5, 6, 9, 10, 11, 12, 13)
         private const val COMIC = 11
-        /** The styles whose plate has a contour (One UI's emboss, or Satin's rim), which get Icon contour. */
-        private val CONTOURED = setOf(0, 1, 2, 3, 5, 6, 7, 8, 10, 12)
+        /** Glass works from every app's own icon, so Theme all apps doesn't apply to it. */
+        private const val GLASS = 13
+        /** The looks drawn for the Square icon shape: picking one switches Icon shape to Square. */
+        private val SQUARE_LOOKS = setOf(GLASS)
+        /** The styles whose plate has a contour (One UI's emboss, Satin's or Glass's rim), which get Icon contour. */
+        private val CONTOURED = setOf(0, 1, 2, 3, 5, 6, 7, 8, 10, 12, 13)
         /** Each look's style index. */
         private val LOOKS = mapOf(
             5 to com.oneuiclone.home.icons.IconFactory.LOOK_DOT,
@@ -58,10 +64,12 @@ class IconThemeActivity : OneUiPage() {
             10 to com.oneuiclone.home.icons.IconFactory.LOOK_SPRINKLES,
             11 to com.oneuiclone.home.icons.IconFactory.LOOK_COMIC,
             12 to com.oneuiclone.home.icons.IconFactory.LOOK_GROOVY,
+            13 to com.oneuiclone.home.icons.IconFactory.LOOK_IOS,
         )
 
-        /** Saves style [s] (Default, Themed, …, Groovy). */
+        /** Saves style [s] (Default, Themed, …, Glass); Glass brings the Square icon shape with it. */
         fun apply(s: Int, prefs: Prefs) {
+            if (s in SQUARE_LOOKS) prefs.iconShape = com.oneuiclone.home.icons.IconShape.SQUARE
             prefs.themedIcons = s in THEMED
             prefs.glassIcons = s == 2
             prefs.darkIcons = s == 3
@@ -110,9 +118,14 @@ class IconThemeActivity : OneUiPage() {
     }
 
     override fun build() {
-        if (!built) { built = true; layout() } else onReturn?.invoke(style(prefs))
+        // Glass switches the icon shape from the theme page: show the new one in the shape row too
+        if (built && prefs.iconShape != shapeShown) { recreate(); return }
+        if (!built) { built = true; shapeShown = prefs.iconShape; layout() } else onReturn?.invoke(style(prefs))
         preview.load { refreshDock() }
     }
+
+    /** The icon shape the page was laid out with. */
+    private var shapeShown = ""
 
     /** Shows the saved theme in the Icon theme row, and the rows that go with it. */
     private var onReturn: ((Int) -> Unit)? = null
@@ -124,7 +137,9 @@ class IconThemeActivity : OneUiPage() {
 
     /**
      * Icon shape: a row with the current shape in a chip; tapping it opens every shape as a tile under it (tap one to
-     * use it), and tapping it again closes them.
+     * use it), and tapping it again closes them. Under it, for any shape but the squircle, Keep folders and widgets
+     * squircle; and for round folders, Folder icons: the apps inside the folder's circle, poking out past it, or four
+     * as on Pixel.
      */
     private fun shapeCard() = card {
         val c = current ?: return@card
@@ -146,6 +161,12 @@ class IconThemeActivity : OneUiPage() {
             visibility = View.GONE
         }
         lateinit var r: LinearLayout
+        lateinit var folderRow: View
+        lateinit var keepRow: View
+        fun showRows() {
+            keepRow.visibility = if (chosen != com.oneuiclone.home.icons.IconShape.SQUIRCLE) View.VISIBLE else View.GONE
+            folderRow.visibility = if (chosen == com.oneuiclone.home.icons.IconShape.CIRCLE && !prefs.keepSquircle) View.VISIBLE else View.GONE
+        }
         r = row("Icon shape", com.oneuiclone.home.icons.IconShape.name(chosen), sub, chip, {
             val open = tiles.visibility != View.VISIBLE
             tiles.visibility = if (open) View.VISIBLE else View.GONE
@@ -187,9 +208,11 @@ class IconThemeActivity : OneUiPage() {
                     if (id == chosen) return@setOnClickListener
                     chosen = id
                     prefs.iconShape = id
+                    shapeShown = id
                     glyph.shape = id
                     ((r.getChildAt(0) as LinearLayout).getChildAt(1) as android.widget.TextView).text = com.oneuiclone.home.icons.IconShape.name(id)
                     for (i in 0 until tiles.childCount) tiles.getChildAt(i).let { t -> mark(t, t.contentDescription == contentDescription) }
+                    showRows()
                     refreshDock()
                 }
             }
@@ -197,6 +220,17 @@ class IconThemeActivity : OneUiPage() {
             tiles.addView(tile, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         c.addView(tiles)
+        keepRow = toggle("Keep folders and widgets squircle", "Folders and Launchii's widgets stay One UI's shape. Only app icons change.",
+            prefs.keepSquircle) {
+            prefs.keepSquircle = it; showRows(); refreshDock()
+        }
+        val styles = listOf(com.oneuiclone.home.ui.FolderIconView.INSIDE, com.oneuiclone.home.ui.FolderIconView.OUTSIDE, com.oneuiclone.home.ui.FolderIconView.PIXEL)
+        folderRow = dropdown("Folder icons", listOf("Inside", "Outside", "Pixel"), styles.indexOf(prefs.folderIcons).coerceAtLeast(0),
+            listOf("Apps sit inside the folder's circle", "Apps poke out past the folder's edge",
+                "Four apps, sized like Pixel Launcher. They open into the full folder")) {
+            prefs.folderIcons = styles[it]; refreshDock()
+        }
+        showRows()
         c.layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
     }
 
@@ -248,7 +282,7 @@ class IconThemeActivity : OneUiPage() {
             lateinit var comicRows: List<View>
             lateinit var contourRows: List<View>
             fun showFor(s: Int) {
-                themedRows.forEach { it.visibility = if (s in THEMED) View.VISIBLE else View.GONE }
+                themedRows.forEach { it.visibility = if (s in THEMED && s != GLASS) View.VISIBLE else View.GONE }
                 modeRows.forEach { it.visibility = if (s in LIGHT_AND_DARK) View.VISIBLE else View.GONE }
                 anyRows.forEach { it.visibility = if (s > 0) View.VISIBLE else View.GONE }
                 frostedRows.forEach { it.visibility = if (s == 2) View.VISIBLE else View.GONE }

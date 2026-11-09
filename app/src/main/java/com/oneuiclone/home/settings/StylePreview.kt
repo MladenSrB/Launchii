@@ -7,11 +7,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
@@ -197,15 +200,28 @@ class StylePreview(private val activity: Activity) {
      * empty), and hands both to [done] (main thread); a newer request supersedes it. Icons are made off the main
      * thread, the views drawn on it.
      */
-    fun render(look: Look, homeWidth: Int, dockWidth: Int, done: (home: Bitmap, dock: Bitmap) -> Unit) {
+    fun render(look: Look, homeWidth: Int, dockWidth: Int, done: (home: Bitmap, dock: Bitmap) -> Unit) =
+        withIcons(look) { l, dp, made -> drawHome(l, dp, look, made, homeWidth, dockWidth).let { (h, d) -> done(h, d) } }
+
+    /**
+     * Home's first page as live views on a clear background, display-sized, for a window that draws its own
+     * wallpaper under it (Set wallpaper's photo); [bright] gives dark labels and dots, as Home does on a light
+     * wallpaper. Glass parts follow [rebuildGlass].
+     */
+    fun homeView(look: Look, bright: Boolean, done: (View) -> Unit) =
+        withIcons(look) { l, dp, made -> done(buildHome(l, dp, look, made, bright)) }
+
+    /** Frosted folders, plates and the search pill blur [full] (a display-sized wallpaper) from now on. */
+    fun rebuildGlass(full: Bitmap) = glass.rebuild(full)
+
+    /** Makes (or reuses) the icons for [look], then [then] on the main thread unless a newer request came in. */
+    private fun withIcons(look: Look, then: (Loaded, DeviceProfile, Map<AppKey, Bitmap>) -> Unit) {
         val l = loaded ?: return
         val gen = ++generation
         val dp = profile(look.iconScale)
         val key = listOf(dp.iconSizePx, look.themed, look.themeAll, look.plateAlpha, look.dark, look.minimal, look.look, look.mode, look.shape, look.comicBorder, look.shine, iconFactory.isNight())
-        val draw = { made: Map<AppKey, Bitmap> ->
-            if (gen == generation) drawHome(l, dp, look, made, homeWidth, dockWidth).let { (h, d) -> done(h, d) }
-        }
-        if (key == iconsFor) { draw(icons); return }
+        val use = { made: Map<AppKey, Bitmap> -> if (gen == generation) then(l, dp, made) }
+        if (key == iconsFor) { use(icons); return }
         io.execute {
             val night = iconFactory.isNight()
             val made = l.drawables.mapValues { (k, v) ->
@@ -214,13 +230,13 @@ class StylePreview(private val activity: Activity) {
             main.post {
                 if (io.isShutdown) return@post
                 icons = made; iconsFor = key
-                draw(made)
+                use(made)
             }
         }
     }
 
-    private fun drawHome(l: Loaded, dp: DeviceProfile, look: Look, made: Map<AppKey, Bitmap>, homeWidth: Int, dockWidth: Int): Pair<Bitmap, Bitmap> {
-        val bright = l.homeColors != null && (l.homeColors.colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0
+    /** Home's first page, dock, search button and dots, laid out at the full display size. */
+    private fun buildHome(l: Loaded, dp: DeviceProfile, look: Look, made: Map<AppKey, Bitmap>, bright: Boolean): FrameLayout {
         val root = FrameLayout(activity)
         val page = CellLayout(activity, dp.homeCols, dp.homeRows).apply {
             setPadding(dp.workspaceGrid.left, dp.workspaceGrid.top, dp.widthPx - dp.workspaceGrid.right, dp.heightPx - dp.workspaceGrid.bottom)
@@ -238,7 +254,7 @@ class StylePreview(private val activity: Activity) {
                 IconView(activity, dp).apply {
                     this.icon = icon
                     label = l.drawables[item.key]?.first ?: ""
-                    if (look.themed && (look.plateAlpha < 1f || look.look == IconFactory.LOOK_STENCIL)) plateGlass = glass
+                    if (needsGlass(look)) plateGlass = glass
                 }
             }
             is HomeItem.Folder -> {
@@ -285,6 +301,13 @@ class StylePreview(private val activity: Activity) {
 
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         root.layout(0, 0, width, height)
+        return root
+    }
+
+    private fun drawHome(l: Loaded, dp: DeviceProfile, look: Look, made: Map<AppKey, Bitmap>, homeWidth: Int, dockWidth: Int): Pair<Bitmap, Bitmap> {
+        val bright = l.homeColors != null && (l.homeColors.colorHints and WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0
+        val root = buildHome(l, dp, look, made, bright)
+        val dock = l.items.filter { it.container == Container.HOTSEAT }
         val wall = l.home ?: gradient(l.homeColors)
         val screenW = width.toFloat()
         val home = Bitmap.createBitmap(homeWidth, (homeWidth * height / width.toFloat()).toInt(), Bitmap.Config.ARGB_8888)
@@ -327,7 +350,19 @@ class StylePreview(private val activity: Activity) {
             val sy = ((wall.height - ch) * 0.55f).toInt()
             val patch = Bitmap.createScaledBitmap(Bitmap.createBitmap(wall, sx.coerceAtLeast(0), sy.coerceAtLeast(0),
                 cw.coerceAtMost(wall.width), ch), w, h, true)
-            val soft = Bitmap.createScaledBitmap(Bitmap.createScaledBitmap(patch, (w / 12).coerceAtLeast(1), (h / 12).coerceAtLeast(1), true), w, h, true)
+            // Home's glass (WidgetGlass: the whole wallpaper blurred and graded), placed as the patch is
+            val frost = if (looks.none { needsGlass(it) }) null else try {
+                WidgetGlass.blurred(width, height) { WallpaperLayer.drawFramed(it, wall); true }
+            } catch (e: Exception) { null }
+            val frostPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+            if (frost != null) frostPaint.shader = BitmapShader(frost, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                setLocalMatrix(Matrix().apply {
+                    setScale(width / frost.width.toFloat(), height / frost.height.toFloat())
+                    postTranslate(-sx.coerceAtLeast(0).toFloat(), -sy.coerceAtLeast(0).toFloat())
+                    postScale(w / cw.coerceAtMost(wall.width).toFloat(), h / ch.toFloat())
+                })
+            }
+            val plate = Path()
             val night = iconFactory.isNight()
             val size = (h * 0.36f).toInt()
             val gap = size * 0.24f
@@ -346,12 +381,10 @@ class StylePreview(private val activity: Activity) {
                     } catch (e: Exception) { continue }
                     val x = left + (j % 2) * (size + gap)
                     val y = top + (j / 2) * (size + gap)
-                    if (look.themed && (look.plateAlpha < 1f || look.look == IconFactory.LOOK_STENCIL)) {
-                        c.save()
-                        c.translate(x, y)
-                        c.clipPath(IconFactory.maskPath(size.toFloat()))
-                        c.drawBitmap(soft, -x, -y, paint)
-                        c.restore()
+                    if (frost != null && needsGlass(look)) {
+                        plate.set(IconFactory.maskPath(size.toFloat()))
+                        plate.offset(x, y)
+                        c.drawPath(plate, frostPaint)
                     }
                     c.drawBitmap(icon, x, y, paint)
                 }
@@ -359,6 +392,9 @@ class StylePreview(private val activity: Activity) {
             }
         }
     }
+
+    /** Looks whose plates show the blurred wallpaper through them (Frosted, Stencil), as Home draws them. */
+    private fun needsGlass(look: Look) = look.themed && (look.plateAlpha < 1f || look.look == IconFactory.LOOK_STENCIL)
 
     /** The lock screen: its wallpaper under a large stacked clock and the date. */
     fun renderLock(outWidth: Int): Bitmap? {

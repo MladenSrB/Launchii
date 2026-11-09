@@ -3,10 +3,13 @@ package com.oneuiclone.home.ui
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.view.View
 import com.oneuiclone.home.motion.Easing
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.pow
 
 /**
  * HOME ⇄ APPS screen transition, ported from One UI Home (spec §3):
@@ -14,6 +17,9 @@ import kotlin.math.max
  *  - the screen being hidden: scale 1→0.94, alpha = 1−EXIT(f), translationY 0 → ∓86dp·f
  *  - release: fling if |v| > 1 px/ms, commit if fling or f > 0.4, reverse fling cancels,
  *    duration = max(100, 1200 / max(2, |v|·0.5) · max(0.2, remaining)), cubic / quintic (|v| > 10).
+ *
+ * [liftHome] (search from Home, "Lift-Off"): Home instead grows toward the viewer, blurs and fades, and the Apps
+ * screen's blurred background comes in under it; the search view drives it frame by frame and [settle]s it.
  */
 class StateController(
     private val home: View,
@@ -33,6 +39,12 @@ class StateController(
     private var toApps = true
     val isTransitioning get() = anim?.isRunning == true || dragging
     private var dragging = false
+
+    /** The next transition is Lift-Off (set before [begin]; cleared when it settles). */
+    var liftHome = false
+    /** No blur on low-RAM (Go) phones: Home only grows and fades there. */
+    private val liftBlur = if (home.context.getSystemService(android.app.ActivityManager::class.java).isLowRamDevice) 0f
+        else home.resources.displayMetrics.density * LIFT_BLUR_DP
 
     fun begin(towardApps: Boolean) {
         anim?.cancel()
@@ -79,6 +91,14 @@ class StateController(
         animateTo(1f, duration, Easing.CUBIC_OUT)
     }
 
+    /** Ends a driven transition where it is: [committed] = reached the screen it was heading for. */
+    fun settle(committed: Boolean) {
+        anim?.cancel()
+        dragging = false
+        apply(if (committed) 1f else 0f)
+        finish(committed)
+    }
+
     fun setImmediate(target: State) {
         anim?.cancel()
         toApps = target == State.APPS
@@ -107,6 +127,8 @@ class StateController(
         val showApps = newState == State.APPS
         home.setLayerType(View.LAYER_TYPE_NONE, null)
         apps.setLayerType(View.LAYER_TYPE_NONE, null)
+        home.setRenderEffect(null)
+        liftHome = false
         // settle exactly
         setScreen(apps, showApps)
         setScreen(home, !showApps)
@@ -126,6 +148,7 @@ class StateController(
 
     private fun apply(progress: Float) {
         f = progress
+        if (liftHome) { applyLift(if (toApps) f else 1f - f); return }
         val ty = transitionY()
         val showing = if (toApps) apps else home
         val hiding = if (toApps) home else apps
@@ -142,5 +165,24 @@ class StateController(
         hiding.alpha = 1f - exit
         hiding.translationY = if (toApps) -ty * f else ty * f
         background.set(BackgroundController.Kind.APPS, if (toApps) f else 1f - f)
+    }
+
+    /** Lift-Off at [g] (0 = Home, 1 = gone): most of the growth and blur early, the fade over 12–75%. */
+    private fun applyLift(g: Float) {
+        val e = 1f - (1f - g).pow(2.2f)
+        home.scaleX = 1f + LIFT_SCALE * e; home.scaleY = home.scaleX
+        home.translationY = 0f
+        home.alpha = 1f - ((g - 0.12f) / 0.63f).coerceIn(0f, 1f)
+        val r = liftBlur * e
+        home.setRenderEffect(if (r < 0.5f) null else RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP))
+        // the Apps screen only lends its background here (its grid stays hidden under the search)
+        apps.scaleX = 1f; apps.scaleY = 1f; apps.translationY = 0f
+        apps.alpha = g
+        background.set(BackgroundController.Kind.APPS, e)
+    }
+
+    companion object {
+        const val LIFT_SCALE = 0.1f
+        const val LIFT_BLUR_DP = 15f
     }
 }

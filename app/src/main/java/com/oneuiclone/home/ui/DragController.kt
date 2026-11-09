@@ -699,7 +699,7 @@ class DragController(
         cleanup()
         val large = folder as? LargeFolderIconView
         // the preview slot an app at [r] shows in, -1 if none; a large folder's stack takes everything from the 4th on
-        fun slotOf(r: Int) = large?.slotFor(r) ?: if (r < FolderIconView.GRID * FolderIconView.GRID) r else -1
+        fun slotOf(r: Int) = large?.slotFor(r) ?: folder.slotOfRank(r)
         fun ownSlot(r: Int) = slotOf(r).let { it >= 0 && !(large?.hasStack == true && it == 3) }
         folder.hiddenPreviews = listOfNotNull(rank.takeIf { ownSlot(it) }?.let { slotOf(it) }, if (made != null) 0 else null).toSet()
         folder.folderBgScale = plateFrom
