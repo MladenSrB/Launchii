@@ -1646,6 +1646,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.postDelayed(openingInputTimeout, CARD_TIMEOUT_MS + ZOOM_IN_MS + LAUNCH_WAIT_MS)
         cancelPredictiveBack(immediate = true)
         unlockAnimation.finish()
+        // A new open takes over from the previous system return. Quickstep may stop
+        // driving its floating surface without delivering the finish callback.
+        finishContract(immediate = true)
         cancelMaskLaunch()
         val tapAt = android.os.SystemClock.uptimeMillis()
         val closingFor = closingUntil - tapAt
@@ -1969,6 +1972,12 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     /** The replaced card keeps animating back while another card or folder opens. */
     private fun retractLaunchCard(why: String) {
         val card = launchCard ?: return
+        // An exiting mask may already be transparent. Restore its real icon instead
+        // of retracting an invisible replacement with that icon still hidden.
+        if (card.alpha < 1f) {
+            dropLaunchCard(fade = false)
+            return
+        }
         cancelMaskLaunch()
         root.removeCallbacks(cardTimeout)
         val retraction = CardRetraction(card, cardTarget)
@@ -1981,13 +1990,12 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         cardAnim?.cancel()
         cardAnim = null
         AnimLog.log("zoom in: open interrupted ($why) at card %.2f, back into the icon".format(card.progress))
-        val startAlpha = card.alpha
         retraction.animation = ValueAnimator.ofFloat(card.progress, 0f).apply {
             duration = CARD_RETRACT_MS
             interpolator = Easing.APP_RETURN
             addUpdateListener {
+                // This card is the only visible copy until it lands. Keep it opaque.
                 card.progress = it.animatedValue as Float
-                card.alpha = startAlpha * (it.animatedFraction.let { fraction -> 1f - fraction * fraction })
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) { finishCardRetraction(retraction) }
@@ -2512,7 +2520,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             }
             ripple.pulse(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
         }
-            .also { root.postDelayed(it, 120) }
+            .also { root.postOnAnimation(it) }
     }
 
     // ---------------------------------------------------------------------------------------------

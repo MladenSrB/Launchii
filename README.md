@@ -118,8 +118,11 @@ suppression have been rolled back. Blur, the return shrink, foldable layouts and
 Return targets use final screen coordinates, and the floating icon hands back to the real icon as soon as
 the system close finishes, even if desktop scaling is still running, so there is no invisible gap.
 The landing icon is excluded from the return ripple; surrounding icons use 1.6× displacement
-with the original timing. Once a new app is selected, opening gestures cannot replace it with
+starting on the next return frame, with the original distance-based stagger.
+Once a new app is selected, opening gestures cannot replace it with
 another app. Tapping the next app during a return remains supported, including the system-close wait.
+A new launch immediately releases the previous return surface and restores its real icon.
+Interrupted opening cards remain opaque while retracting; already fading masks are removed immediately.
 Detached icon/widget origins fall back to the normal zoom. Deep shortcuts share this launch path and report
 failures instead of silently swallowing them. Widget IntentSender launches preserve their original options
 and include the Android 14+ sender opt-in (visible-only on Android 16+).
