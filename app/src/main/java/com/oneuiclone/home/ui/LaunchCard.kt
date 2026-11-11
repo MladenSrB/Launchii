@@ -156,7 +156,10 @@ class LaunchCard(context: Context) : View(context) {
         } else if (isDarkMode) darkMaskFilter else null
         val shown = if (fadeIn) (pc / FADE_IN).coerceAtMost(1f) else 1f
         val solid = lerp(fromAlpha, 1f, (pc / FROM_ALPHA_GONE).coerceAtMost(1f))
-        cardPaint.alpha = (Color.alpha(c) * shown * solid).toInt()
+        // The bitmap may have transparent padding inside its shape. Remove only the
+        // extended colour as we land, leaving the actual icon fully visible.
+        val landingMask = if (retracting && icon != null) (pc / 0.15f).coerceIn(0f, 1f) else 1f
+        cardPaint.alpha = (Color.alpha(c) * shown * solid * landingMask).toInt()
         val shape = fromShape?.takeIf { pc < SHAPE_GONE }
         if (shape != null) {
             val size = lerp(from.width(), com.oneuiclone.home.icons.IconShape.cover(rect.width(), rect.height()), pc / SHAPE_GONE)

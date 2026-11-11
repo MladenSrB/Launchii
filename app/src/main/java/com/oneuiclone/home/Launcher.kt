@@ -1890,7 +1890,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             if (target != null) {
                 startRadius = icon.width() * com.oneuiclone.home.icons.IconShape.corner(com.oneuiclone.home.ui.LaunchCard.ICON_RADIUS)
                 // the card starts as the icon's own shape
-                if (!com.oneuiclone.home.icons.IconShape.isSquircle) fromShape = com.oneuiclone.home.icons.IconShape.current
+                fromShape = com.oneuiclone.home.icons.IconShape.current
             } else {
                 startRadius = 26f * activity.resources.displayMetrics.density        // the widget's clip (RoundedWidgetView)
                 fromIconPx = dp.iconSizePx.toFloat()
