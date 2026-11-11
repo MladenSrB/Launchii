@@ -297,9 +297,9 @@ class AppsSearch(
         })
         glyph.pivotX = 0f
         glyph.pivotY = dp.dpi(24f) / 2f
-        // bottom-up: apps resting on the bar, Google above them, contacts on top; fitted, never scrolled
+        // Results start below the status bar; the search field stays above the keyboard.
         content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.BOTTOM
+        content.gravity = Gravity.TOP
         content.clipChildren = false
         for (box in listOf(contactsBox, web)) {
             box.orientation = LinearLayout.VERTICAL
