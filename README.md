@@ -115,8 +115,11 @@ and disabled system animations skip this exit effect. It does not apply blur to 
 Home, screen-off, cancelled cards, new requests and destruction invalidate a pending mask launch.
 The experimental frame-dispatch queue, frozen intermediate state and late-intent
 suppression have been rolled back. Blur, the return shrink, foldable layouts and unlock reveal remain.
-Return targets use final screen coordinates, and the floating icon hands back to the real icon only after
-both the system close and desktop scaling finish. The landing icon is excluded from the return ripple.
+Return targets use final screen coordinates, and the floating icon hands back to the real icon as soon as
+the system close finishes, even if desktop scaling is still running, so there is no invisible gap.
+The landing icon is excluded from the return ripple; surrounding icons use 1.6× displacement
+with the original timing. Once a new app is selected, opening gestures cannot replace it with
+another app. Tapping the next app during a return remains supported, including the system-close wait.
 Detached icon/widget origins fall back to the normal zoom. Deep shortcuts share this launch path and report
 failures instead of silently swallowing them. Widget IntentSender launches preserve their original options
 and include the Android 14+ sender opt-in (visible-only on Android 16+).
@@ -143,6 +146,7 @@ Additional device checks:
   centre artwork must not change the sampled outer-ring palette.
 - Check the app appears after the mask fully expands without a second system zoom, including warm/cold
   starts, shortcuts, widget links and another user profile.
+- During app opening, tap other icons repeatedly: only the first app should launch.
 - At early/middle/late stages of a return, tap a different app, widget or shortcut: compare behavior
   with the original launch handling, including its system-close wait and fallback.
 - Repeat with Zoom In, Smooth and each installed live-wallpaper effect; check their original effects play.

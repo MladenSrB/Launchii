@@ -1597,6 +1597,14 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private var pendingLaunch: (() -> Unit)? = null
     private var maskLaunchGeneration = 0
     private var maskLaunchPending = false
+    /** A new app owns input until Home is covered or that open is explicitly cancelled. */
+    private var openingInputBlocked = false
+    private val openingInputTimeout = Runnable { cancelOpen() }
+
+    private fun releaseOpeningInput() {
+        openingInputBlocked = false
+        root.removeCallbacks(openingInputTimeout)
+    }
 
     private fun cancelMaskLaunch() {
         maskLaunchGeneration++
@@ -1633,6 +1641,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      */
     private fun open(label: String, app: AppInfo?, failure: String, icon: IconView? = null,
                      widget: View? = null, widgetApp: AppInfo? = null, start: (android.os.Bundle?) -> Unit) {
+        if (openingInputBlocked) return
+        openingInputBlocked = true
+        root.postDelayed(openingInputTimeout, CARD_TIMEOUT_MS + ZOOM_IN_MS + LAUNCH_WAIT_MS)
         cancelPredictiveBack(immediate = true)
         unlockAnimation.finish()
         cancelMaskLaunch()
@@ -1681,6 +1692,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 AnimLog.log("start $label after ${android.os.SystemClock.uptimeMillis() - tapAt}ms")
                 if (hold && !zoomIn && effect == null) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS, layer)
                 start(appOptions)
+                root.removeCallbacks(openingInputTimeout)
+                if (openingInputBlocked) root.postDelayed(openingInputTimeout, CARD_TIMEOUT_MS)
                 if (launchCard != null) { root.removeCallbacks(cardTimeout); root.postDelayed(cardTimeout, CARD_TIMEOUT_MS) }
                 if (effectContent != null) { root.removeCallbacks(effectTimeout); root.postDelayed(effectTimeout, CARD_TIMEOUT_MS) }
                 true
@@ -2135,6 +2148,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /** The app didn't start: Home comes back from the open zoom. */
     private fun cancelOpen() {
+        releaseOpeningInput()
         cancelMaskLaunch()
         pendingLaunch = null
         root.removeCallbacks(launchFallback)
@@ -2267,6 +2281,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /** Home's window hidden behind an app (or Home stopped): the open's card and effect go, out of sight. */
     private fun homeHidden() {
+        releaseOpeningInput()
         hiddenSinceOpen = true
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
         dropLaunchCard(fade = false)
@@ -2341,6 +2356,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     fun onScreenLocked() {
+        releaseOpeningInput()
         cancelPredictiveBack(immediate = true)
         cancelMaskLaunch()
         unlockAnimation.finish()
@@ -2364,6 +2380,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         skipReturnOnResume = false
         // back before the app covered Home (an app that closed at once, Back mid-open): the card shrinks back
         if (canReturn) {
+            releaseOpeningInput()
             retractLaunchCard("resumed")
             endEffect(animate = true)
         }
@@ -2493,7 +2510,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 overlay -> landing?.view?.let { folderSiblings(it) }.orEmpty()
                 else -> homeSiblings()
             }
-            ripple.pulse(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY())
+            ripple.pulse(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
         }
             .also { root.postDelayed(it, 120) }
     }
@@ -2514,7 +2531,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             skipReturnOnResume = true
             return
         }
-        if (!lateContract) cancelPredictiveBack(immediate = true)
+        if (!lateContract) {
+            releaseOpeningInput()
+            cancelPredictiveBack(immediate = true)
+        }
         val returning = pendingReturnAnim || returnWaiting || contract != null || recentReturn
         if ((pendingReturnAnim && !returnWaiting) || (!alreadyOnHome && !returning)) {
             // Home asked for while an open is still in flight: an app tapped during a close and still held never
@@ -2575,9 +2595,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private var returnScaleFinished = true
 
     private fun finishContractIfSettled() {
-        val target = contractTarget ?: return
-        // Once the system has landed, a newly opened panel can take over foreground rendering immediately.
-        if (contractFinished && (returnScaleFinished || !target.isIn(openContent()))) finishContract()
+        // Quickstep can fade out its surface before the desktop's scale animation ends.
+        // Restore the real icon as soon as Quickstep releases it; waiting for the scale
+        // leaves both copies invisible. The icon follows the remaining desktop motion.
+        if (contractFinished) finishContract()
     }
 
     /** When Home last went to the background: the start of the usage events that tell a split-screen close. */
@@ -2808,7 +2829,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         holder.unlockCanvasAndPost(canvas)
     }
 
-    /** Reveal the real icon only after both the window landing and workspace scale settle. */
+    /** Restore the real icon at the system handoff, before removing its floating surface. */
     private fun finishContract(immediate: Boolean = false) {
         val target = contractTarget
         contractTarget = null
@@ -3363,12 +3384,22 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     inner class RootLayout : FrameLayout(activity) {
+        private var blockedOpeningGesture = false
+
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                blockedOpeningGesture = openingInputBlocked
+            }
+            // Consume the whole gesture, even if Home returns before its UP event.
+            // Return animations leave input available until the next app is selected.
+            if (blockedOpeningGesture) {
+                if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL)
+                    blockedOpeningGesture = false
+                return true
+            }
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
                 unlockAnimation.finish()
-                // A second touch can replace a launch whose app has not been dispatched yet.
                 if (returnWaiting) homeShown("launcher input")
-                if (maskLaunchPending || pendingLaunch != null) cancelOpen()
             }
             return super.dispatchTouchEvent(ev)
         }
@@ -3415,6 +3446,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     fun destroy() {
+        releaseOpeningInput()
         cancelPredictiveBack(immediate = true)
         cancelMaskLaunch()
         pendingLaunch = null

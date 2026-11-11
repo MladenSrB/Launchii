@@ -53,9 +53,10 @@ class TouchRipple(private val samsungPxScale: Float) {
         }
     }
 
-    fun pulse(views: List<View>, tx: Float, ty: Float) = animateWave(views, tx, ty, pulse = true)
+    fun pulse(views: List<View>, tx: Float, ty: Float, strength: Float = 1f) =
+        animateWave(views, tx, ty, pulse = true, strength = strength)
 
-    private fun animateWave(views: List<View>, tx: Float, ty: Float, pulse: Boolean) {
+    private fun animateWave(views: List<View>, tx: Float, ty: Float, pulse: Boolean, strength: Float = 1f) {
         val loc = IntArray(2)
         for (v in views) {
             if (!v.isShown) continue
@@ -64,7 +65,7 @@ class TouchRipple(private val samsungPxScale: Float) {
             val cy = loc[1] + v.height * v.scaleY / 2f - v.translationY
             val d = hypot(cx - tx, cy - ty)
             if (d < 1f) continue
-            val e = Entry(v, (tx - cx) / DISTANCE_UNIT, (ty - cy) / DISTANCE_UNIT)
+            val e = Entry(v, (tx - cx) / DISTANCE_UNIT * strength, (ty - cy) / DISTANCE_UNIT * strength)
             e.anim = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = DURATION
                 startDelay = (DELAY_PER_UNIT * (d / (DISTANCE_UNIT * samsungPxScale))).toLong()
