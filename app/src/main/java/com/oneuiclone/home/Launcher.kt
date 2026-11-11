@@ -1628,6 +1628,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(launchFallback)
         if (source != "wait cap") homeShown("enter complete")
         shortenReturnIntentGuard()
+        finishReturnRippleIfSettled()
         val start = pendingLaunch ?: return
         pendingLaunch = null
         start()
@@ -1649,6 +1650,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // A new open takes over from the previous system return. Quickstep may stop
         // driving its floating surface without delivering the finish callback.
         finishContract(immediate = true)
+        returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
+        ripple.cancelReturn()
         cancelMaskLaunch()
         val tapAt = android.os.SystemClock.uptimeMillis()
         val closingFor = closingUntil - tapAt
@@ -2193,6 +2196,12 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     private var zoomAnim: ValueAnimator? = null
     private var returnRipple: Runnable? = null
+
+    private fun finishReturnRippleIfSettled() {
+        if (!returnScaleFinished || android.os.SystemClock.uptimeMillis() < closingUntil) return
+        returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
+        ripple.finishReturn()
+    }
     private var wallpaperZoom = 1f
     /** A stronger wallpaper zoom shared by app opens and live-wallpaper returns. */
     private val wallpaperOpenZoom = 1.12f
@@ -2289,6 +2298,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /** Home's window hidden behind an app (or Home stopped): the open's card and effect go, out of sight. */
     private fun homeHidden() {
+        returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
+        ripple.cancelReturn()
         releaseOpeningInput()
         hiddenSinceOpen = true
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
@@ -2468,8 +2479,21 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         returnScaleFinished = false
         val content = launchingContent ?: openContent()
         launchingContent = null
+        // Approach the landing icon now; hold this pose until both return animations end.
+        val r = Rect()
+        if (landing != null) landing.restBoundsOnScreen(r) else r.set(0, 0, root.width, root.height)
+        val siblings = when (content) {
+            appsLayer -> appsSiblings()
+            overlay -> landing?.view?.let { folderSiblings(it) }.orEmpty()
+            else -> homeSiblings()
+        }
+        ripple.beginReturn(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
+        returnRipple?.let { root.removeCallbacks(it) }
+        returnRipple = Runnable { finishReturnRippleIfSettled() }
+            .also { root.postDelayed(it, CLOSE_MAX_MS) }
         appMotion(content).returnToRest(RETURN_MS, Easing.APP_RETURN) {
             returnScaleFinished = true
+            finishReturnRippleIfSettled()
             finishContractIfSettled()
             shortenReturnIntentGuard()
         }
@@ -2507,20 +2531,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 start()
             }
         }
-        // REVERSE ripple from the icon the app returns to, or the screen centre (AppCloseAnimationDelegate.itemTouchEvent)
-        val r = Rect()
-        if (landing != null) landing.restBoundsOnScreen(r) else r.set(0, 0, root.width, root.height)
-        returnRipple?.let { root.removeCallbacks(it) }
-        returnRipple = Runnable {
-            returnRipple = null
-            val siblings = when (content) {
-                appsLayer -> appsSiblings()
-                overlay -> landing?.view?.let { folderSiblings(it) }.orEmpty()
-                else -> homeSiblings()
-            }
-            ripple.pulse(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
-        }
-            .also { root.postOnAnimation(it) }
+
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -3454,6 +3465,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     fun destroy() {
+        returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
+        ripple.reset()
         releaseOpeningInput()
         cancelPredictiveBack(immediate = true)
         cancelMaskLaunch()

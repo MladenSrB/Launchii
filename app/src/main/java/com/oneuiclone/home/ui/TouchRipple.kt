@@ -20,7 +20,8 @@ class TouchRipple(private val samsungPxScale: Float) {
 
     private class Entry(val view: View, val dx: Float, val dy: Float) {
         lateinit var anim: ValueAnimator
-        private var fraction = 0f
+        var fraction = 0f
+            private set
 
         fun moveTo(next: Float) {
             val change = next - fraction
@@ -36,13 +37,14 @@ class TouchRipple(private val samsungPxScale: Float) {
     }
 
     private val active = ArrayList<Entry>()
-    private val pulses = ArrayList<Entry>()
+    private val returning = ArrayList<Entry>()
+    private var returnReleasing = false
 
     /** @param tx,ty touch point in screen coordinates. */
     fun start(views: List<View>, tx: Float, ty: Float) {
         active.forEach { it.reset() }
         active.clear()
-        animateWave(views, tx, ty, pulse = false)
+        animateWave(views, tx, ty)
     }
 
     /** STOP / REVERSE: play the press back without changing the app return wave. */
@@ -53,10 +55,45 @@ class TouchRipple(private val samsungPxScale: Float) {
         }
     }
 
-    fun pulse(views: List<View>, tx: Float, ty: Float, strength: Float = 1f) =
-        animateWave(views, tx, ty, pulse = true, strength = strength)
+    /** Pull inward once, then hold until the app's return animation finishes. */
+    fun beginReturn(views: List<View>, tx: Float, ty: Float, strength: Float = 1f) {
+        cancelReturn()
+        if (!ValueAnimator.areAnimatorsEnabled()) return
+        animateWave(views, tx, ty, returnWave = true, strength = strength)
+    }
 
-    private fun animateWave(views: List<View>, tx: Float, ty: Float, pulse: Boolean, strength: Float = 1f) {
+    /** Rebound from the current inward pose, including an interrupted approach. */
+    fun finishReturn() {
+        if (returnReleasing || returning.isEmpty()) return
+        returnReleasing = true
+        for (e in returning.toList()) {
+            e.anim.cancel()
+            e.anim = ValueAnimator.ofFloat(e.fraction, 0f).apply {
+                duration = DURATION
+                interpolator = Easing.RIPPLE
+                addUpdateListener { e.moveTo(it.animatedValue as Float) }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        e.moveTo(0f)
+                        returning.remove(e)
+                    }
+                })
+            }
+            e.anim.start()
+        }
+    }
+
+    /** Remove only the return wave's displacement; press/drag translations remain intact. */
+    fun cancelReturn() {
+        for (e in returning.toList()) {
+            e.anim.removeAllListeners()
+            e.reset()
+        }
+        returning.clear()
+        returnReleasing = false
+    }
+
+    private fun animateWave(views: List<View>, tx: Float, ty: Float, returnWave: Boolean = false, strength: Float = 1f) {
         val loc = IntArray(2)
         for (v in views) {
             if (!v.isShown) continue
@@ -67,21 +104,12 @@ class TouchRipple(private val samsungPxScale: Float) {
             if (d < 1f) continue
             val e = Entry(v, (tx - cx) / DISTANCE_UNIT * strength, (ty - cy) / DISTANCE_UNIT * strength)
             e.anim = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = DURATION
+                duration = if (returnWave) 200L else DURATION
                 startDelay = (DELAY_PER_UNIT * (d / (DISTANCE_UNIT * samsungPxScale))).toLong()
-                interpolator = if (pulse) Easing.LINEAR else Easing.RIPPLE
-                addUpdateListener {
-                    val f = it.animatedValue as Float
-                    e.moveTo(if (pulse) Easing.RIPPLE.getInterpolation(minOf(f, 1f - f)) else f)
-                }
-                if (pulse) addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: android.animation.Animator) {
-                        e.moveTo(0f)
-                        pulses.remove(e)
-                    }
-                })
+                interpolator = if (returnWave) Easing.STANDARD else Easing.RIPPLE
+                addUpdateListener { e.moveTo(it.animatedValue as Float) }
             }
-            if (pulse) pulses += e else active += e
+            if (returnWave) returning += e else active += e
             e.anim.start()
         }
     }
@@ -89,6 +117,6 @@ class TouchRipple(private val samsungPxScale: Float) {
     fun reset() {
         active.forEach { it.reset() }
         active.clear()
-        pulses.toList().forEach { it.reset() }
+        cancelReturn()
     }
 }
