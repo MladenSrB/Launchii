@@ -1,5 +1,6 @@
 package com.oneuiclone.home.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.view.MotionEvent
 import android.view.VelocityTracker
@@ -48,6 +49,37 @@ open class PagedView(context: Context) : ViewGroup(context) {
     /** Unclamped scroll while dragging (for overscroll). */
     private var rawScroll = 0f
     private var overscroll = 0f
+    private var edgeReturn: ValueAnimator? = null
+
+    private fun catchEdgeReturn(): Boolean {
+        val a = edgeReturn ?: return false
+        edgeReturn = null
+        a.cancel()
+        return true
+    }
+
+    private fun returnFromEdge() {
+        catchEdgeReturn()
+        scroller.forceFinished(true)
+        val target = rawScroll.coerceIn(0f, maxScroll.toFloat())
+        edgeReturn = ValueAnimator.ofFloat(rawScroll, target).apply {
+            duration = 480L
+            interpolator = Easing.spring(180f, 0.85f, 480L)
+            addUpdateListener {
+                rawScroll = it.animatedValue as Float
+                applyRawScroll()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (edgeReturn !== animation) return
+                    edgeReturn = null
+                    rawScroll = target
+                    applyRawScroll()
+                }
+            })
+            start()
+        }
+    }
 
     var pageSnapDuration = 750                            // config_pageSnapAnimationDuration
     var enablePaging = true
@@ -95,6 +127,9 @@ open class PagedView(context: Context) : ViewGroup(context) {
     private val maxScroll get() = max(0, (childCount - 1) * step)
 
     fun setCurrentPageImmediately(page: Int) {
+        catchEdgeReturn()
+        overscroll = 0f
+        applyOverscrollScale(0f)
         scroller.forceFinished(true)
         currentPage = page.coerceIn(0, max(0, childCount - 1))
         scrollTo(currentPage * step, 0)
@@ -109,9 +144,10 @@ open class PagedView(context: Context) : ViewGroup(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x; downY = ev.y; lastX = ev.x
                 downScroll = scrollX
-                rawScroll = scrollX.toFloat()
+                val caughtEdge = catchEdgeReturn()
+                if (!caughtEdge) rawScroll = scrollX.toFloat()
                 obtainTracker().addMovement(ev)
-                if (!scroller.isFinished) {
+                if (caughtEdge || !scroller.isFinished) {
                     // catch the page mid-flight (One UI pages are always grabbable)
                     scroller.forceFinished(true)
                     isDragging = true
@@ -148,7 +184,9 @@ open class PagedView(context: Context) : ViewGroup(context) {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x; downY = ev.y; lastX = ev.x
-                downScroll = scrollX; rawScroll = scrollX.toFloat()
+                downScroll = scrollX
+                val caughtEdge = catchEdgeReturn()
+                if (!caughtEdge && !isDragging) rawScroll = scrollX.toFloat()
                 longPressed = false
                 if (onEmptyLongPress != null) postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                 return true
@@ -170,7 +208,9 @@ open class PagedView(context: Context) : ViewGroup(context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
-                if (isDragging) snapToPage(nearestPage(), pageSnapDuration)
+                if (isDragging) {
+                    if (overscroll != 0f) returnFromEdge() else snapToPage(nearestPage(), pageSnapDuration)
+                }
                 isDragging = false
                 recycleTracker()
             }
@@ -226,6 +266,10 @@ open class PagedView(context: Context) : ViewGroup(context) {
         else if (((significant && deltaX < 0 && !fling) || (fling && vx < 0)) && start < childCount - 1) target = start + 1
         else if (!significant && !fling) target = nearestPage()
 
+        if (overscroll != 0f && target == nearestPage()) {
+            returnFromEdge()
+            return
+        }
         applyOverscrollScale(0f)
         if (target == start && !significant && !fling) {
             snapToPage(target, pageSnapDuration)
@@ -252,6 +296,9 @@ open class PagedView(context: Context) : ViewGroup(context) {
     }
 
     fun snapToPage(page: Int, duration: Int = pageSnapDuration) {
+        catchEdgeReturn()
+        overscroll = 0f
+        applyOverscrollScale(0f)
         val p = page.coerceIn(0, max(0, childCount - 1))
         val changed = p != currentPage
         currentPage = p
