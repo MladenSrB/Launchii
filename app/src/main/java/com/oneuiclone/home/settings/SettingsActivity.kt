@@ -21,6 +21,7 @@ import android.widget.Switch
 import android.widget.TextView
 import com.oneuiclone.home.AppBubbles
 import com.oneuiclone.home.BadgeService
+import com.oneuiclone.home.AppUpdate
 import com.oneuiclone.home.ui.Fonts
 
 /**
@@ -153,6 +154,15 @@ class SettingsActivity : OneUiPage() {
         }
         card {
             item("About Home screen", "${getString(com.oneuiclone.home.R.string.app_name)} · ${packageManager.getPackageInfo(packageName, 0).versionName}") {}
+            item("Check for updates", "Check GitHub for a newer version") {
+                AppUpdate.checkNow { message ->
+                    if (!isFinishing) AlertDialog.Builder(this@SettingsActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+                android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
+            }
             item("Open source licences", "Inter typeface") {
                 AlertDialog.Builder(this@SettingsActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle("Inter typeface")
