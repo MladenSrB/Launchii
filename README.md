@@ -118,8 +118,9 @@ suppression have been rolled back. Blur, the return shrink, foldable layouts and
 Return targets use final screen coordinates, and the floating icon hands back to the real icon as soon as
 the system close finishes, even if desktop scaling is still running, so there is no invisible gap.
 The landing icon is excluded from the return ripple; surrounding icons use 1.6× displacement
-pulling toward the landing icon at return start with a distance-based stagger. They hold inward
-until the app-window return and desktop scale finish, then spring back to their own positions.
+pulling toward the landing icon at return start with a distance-based stagger. Their rebound starts
+220ms into the return (or sooner if the system finishes), overlapping the landing tail instead of
+waiting for the icon and desktop to stop. A 480ms damped spring softens the reversal and settling.
 Starting a new app cancels this return displacement.
 Once a new app is selected, opening gestures cannot replace it with
 another app. Tapping the next app during a return remains supported, including the system-close wait.

@@ -67,6 +67,8 @@ private const val LAUNCH_WAIT_MS = 400L
 /** The whole workspace returns from slightly enlarged to its resting size. */
 private const val RETURN_SCALE = 1.14f
 private const val RETURN_MS = 520L
+/** Release neighbours during the landing tail, before the desktop and icon come to rest. */
+private const val RETURN_REBOUND_DELAY_MS = 220L
 /** Longest the close zoom waits for Home to be put back on screen, on phones that never send a gesture contract. */
 private const val RETURN_WAIT_MS = 2000L
 private const val KEY_CONTRACT_SEEN = "contract_seen"
@@ -1628,7 +1630,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(launchFallback)
         if (source != "wait cap") homeShown("enter complete")
         shortenReturnIntentGuard()
-        finishReturnRippleIfSettled()
+        releaseReturnRipple()
         val start = pendingLaunch ?: return
         pendingLaunch = null
         start()
@@ -2197,8 +2199,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private var zoomAnim: ValueAnimator? = null
     private var returnRipple: Runnable? = null
 
-    private fun finishReturnRippleIfSettled() {
-        if (!returnScaleFinished || android.os.SystemClock.uptimeMillis() < closingUntil) return
+    private fun releaseReturnRipple() {
         returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
         ripple.finishReturn()
     }
@@ -2479,7 +2480,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         returnScaleFinished = false
         val content = launchingContent ?: openContent()
         launchingContent = null
-        // Approach the landing icon now; hold this pose until both return animations end.
+        // Approach first, then rebound during the landing tail so both motions settle together.
         val r = Rect()
         if (landing != null) landing.restBoundsOnScreen(r) else r.set(0, 0, root.width, root.height)
         val siblings = when (content) {
@@ -2489,11 +2490,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         ripple.beginReturn(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
         returnRipple?.let { root.removeCallbacks(it) }
-        returnRipple = Runnable { finishReturnRippleIfSettled() }
-            .also { root.postDelayed(it, CLOSE_MAX_MS) }
+        returnRipple = Runnable { releaseReturnRipple() }
+            .also { root.postDelayed(it, RETURN_REBOUND_DELAY_MS) }
         appMotion(content).returnToRest(RETURN_MS, Easing.APP_RETURN) {
             returnScaleFinished = true
-            finishReturnRippleIfSettled()
+            releaseReturnRipple()
             finishContractIfSettled()
             shortenReturnIntentGuard()
         }

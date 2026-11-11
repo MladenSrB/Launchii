@@ -16,6 +16,8 @@ class TouchRipple(private val samsungPxScale: Float) {
         const val DURATION = 650L
         const val DISTANCE_UNIT = 50f
         const val DELAY_PER_UNIT = 6L
+        private const val RETURN_REBOUND_MS = 480L
+        private val RETURN_REBOUND = Easing.spring(220f, 0.72f, RETURN_REBOUND_MS)
     }
 
     private class Entry(val view: View, val dx: Float, val dy: Float) {
@@ -55,7 +57,7 @@ class TouchRipple(private val samsungPxScale: Float) {
         }
     }
 
-    /** Pull inward once, then hold until the app's return animation finishes. */
+    /** Pull inward once, then hold until the landing tail releases the neighbours. */
     fun beginReturn(views: List<View>, tx: Float, ty: Float, strength: Float = 1f) {
         cancelReturn()
         if (!ValueAnimator.areAnimatorsEnabled()) return
@@ -69,8 +71,8 @@ class TouchRipple(private val samsungPxScale: Float) {
         for (e in returning.toList()) {
             e.anim.cancel()
             e.anim = ValueAnimator.ofFloat(e.fraction, 0f).apply {
-                duration = DURATION
-                interpolator = Easing.RIPPLE
+                duration = RETURN_REBOUND_MS
+                interpolator = RETURN_REBOUND
                 addUpdateListener { e.moveTo(it.animatedValue as Float) }
                 addListener(object : android.animation.AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: android.animation.Animator) {
