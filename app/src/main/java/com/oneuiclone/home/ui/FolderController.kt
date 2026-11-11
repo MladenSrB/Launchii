@@ -55,6 +55,9 @@ class FolderController(
     private val onReorder: (HomeItem.Folder, List<HomeItem.App>) -> Unit = { _, _ -> },
     /** How far a pop-up folder has dimmed and shrunk Home (0 none .. 1 all), every frame: Home scales with it. */
     private val onOpenness: (Float) -> Unit = {},
+    private val onReturnStart: (FolderIconView) -> Unit = {},
+    private val onReturnFinish: () -> Unit = {},
+    private val onReturnCancel: () -> Unit = {},
 ) {
     companion object {
         const val DURATION = 350L
@@ -131,8 +134,7 @@ class FolderController(
 
     private fun report(e: Float) {
         openness = e
-        if (dim.parent == null) return
-        dim.background.alpha = (255 * POPUP_DIM * e).roundToInt()
+        if (dim.parent != null) dim.background.alpha = (255 * POPUP_DIM * e.coerceIn(0f, 1f)).roundToInt()
         onOpenness(e)
     }
 
@@ -308,6 +310,7 @@ class FolderController(
         val p = panel ?: return false
         if (!isOpen || dragging || !ValueAnimator.areAnimatorsEnabled()) return false
         p.hideKeyboard()
+        source?.let { onReturnStart(it) }
         predictiveBack = true
         p.backPreview = true
         runAnimation(open = false, fromCurrent = true, interactive = true)
@@ -337,8 +340,9 @@ class FolderController(
         predictiveBack = false
         panel?.backPreview = false
         isOpen = false
+        source?.let { onReturnStart(it) }
         panel?.hideKeyboard()
-        if (!animate) { finishClose(); return }
+        if (!animate) { onReturnCancel(); finishClose(); return }
         // a tap while it closes is for Home (the folder icon under the shrinking card reopens it), not its apps
         panel?.passThrough = true
         runAnimation(open = false)
@@ -346,6 +350,7 @@ class FolderController(
 
     /** Closes the folder at once, open or still closing: Home is about to be covered. */
     fun closeNow() {
+        onReturnCancel()
         if (isOpen) close(animate = false) else if (anim?.isRunning == true && !dragging) finishClose()
     }
 
@@ -367,6 +372,7 @@ class FolderController(
     private fun runAnimation(open: Boolean, fromCurrent: Boolean = false, interactive: Boolean = false) {
         val p = panel ?: return
         val icon = source ?: return
+        if (open) onReturnCancel()
         val dp = dpProvider()
         // turning round mid-way (a tap in and out): start from what's on screen
         val old = anim
@@ -384,7 +390,9 @@ class FolderController(
         // geometry: container scales from the folder icon (a pop-up's, where it was before Home shrank: it is
         // there again as the close lands)
         val iconRect = Rect()
-        if (p.isPopup) iconRect.set(restRect) else icon.iconBoundsOnScreen(iconRect)
+        // Home is scaled while the folder is open. Both folder styles must land
+        // at the original bounds, where Home will be when this morph finishes.
+        iconRect.set(restRect)
         val tray = p.trayRect
         val srcSize = icon.iconSizePx()
         // a wide pop-up card (3×2) shrinks by its height: its centred square is what becomes the icon
@@ -457,9 +465,10 @@ class FolderController(
                 p.scaleX = s; p.scaleY = s
                 p.translationX = dx * (1f - e); p.translationY = dy * (1f - e)
                 val ms = t * timing
+                report(h0 + (target - h0) * curve.getInterpolation(t))
                 if (popup) {
                     // Home dims and shrinks on the folder curve, not the spring (it doesn't bounce)
-                    report(h0 + (target - h0) * Easing.FOLDER.getInterpolation((ms / DURATION).coerceAtMost(1f)))
+
                     // the icon's colour over the card hands over to the card's own look early in the open and
                     // comes back as the close reaches the icon (nothing to hand over with Style › Blur: they're the same)
                     val tint = (if (open) tint0 - ms / 140f else 1f - e / 0.12f).coerceIn(0f, 1f)
@@ -509,7 +518,7 @@ class FolderController(
                         p.gridIcons().forEach { if (it !== p.placeholder) it.iconVisible = true }
                         p.contentAlpha(1f, false)
                         clearFliers()
-                    } else finishClose()
+                    } else { finishClose(); onReturnFinish() }
                 }
             })
             start()
@@ -538,8 +547,8 @@ class FolderController(
         // (a drag that left the folder has the background now)
         if (background.current == BackgroundController.Kind.FOLDER) background.set(BackgroundController.Kind.FOLDER, 0f)
         homeContent().alpha = 1f
+        report(0f)
         if (dim.parent != null) {
-            report(0f)
             (dim.parent as ViewGroup).removeView(dim)
         }
     }

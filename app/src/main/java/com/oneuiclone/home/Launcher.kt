@@ -202,9 +202,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         onOpenness = { h ->
             val v = if (state.state == StateController.State.APPS) appsLayer else homeLayer
             centrePivot(v)
-            val s = 1f - (1f - com.oneuiclone.home.ui.FolderController.POPUP_HOME_SCALE) * h
+            val s = 1f + (OPEN_SCALE - 1f) * h
             v.scaleX = s; v.scaleY = s
         },
+        onReturnStart = { icon ->
+            val rect = Rect()
+            icon.iconBoundsOnScreen(rect)
+            val siblings = if (state.state == StateController.State.APPS) appsSiblings() else homeSiblings()
+            ripple.beginReturn(siblings.filter { it !== icon }, rect.exactCenterX(), rect.exactCenterY(), strength = 1.6f)
+        },
+        onReturnFinish = { ripple.finishReturn() },
+        onReturnCancel = { ripple.cancelReturn() },
     )
 
     /** Folder "+" (folder_add_apps): multi-select app picker. */
@@ -307,6 +315,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private var armY = 0f
     private class LaunchOrigin(val key: AppKey, val user: android.os.UserHandle, val itemId: Long?, val layer: ViewGroup)
     private var launchOrigin: LaunchOrigin? = null
+    private var searchLaunchKey: AppKey? = null
     /** The widget the last app was opened from, and the packages its window may report (Launcher3's launch cookie). */
     private class WidgetLaunch(val appWidgetId: Int, val packages: Set<String>)
     private var lastWidgetLaunch: WidgetLaunch? = null
@@ -1676,7 +1685,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         AnimLog.log("tap $label " + (if (hold) "during close (window ${closingFor}ms left) -> hold" else "-> start now") +
             if (effect != null) " ($effect)" else if (zoomIn) " (zoom in)" else "")
         val layer = openContent()
-        val origin = if (icon != null && app != null && icon.isAttachedToWindow &&
+        val fromSearch = app != null && searchLaunchKey == app.key
+        searchLaunchKey = null
+        val origin = if (fromSearch) LaunchOrigin(app!!.key, app.user, null, appsLayer)
+        else if (icon != null && app != null && icon.isAttachedToWindow &&
             generateSequence(icon.parent) { it.parent }.any { it === layer }) {
             LaunchOrigin(app.key, app.user, icon.item?.id, layer)
         } else null
@@ -1985,6 +1997,15 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         cancelMaskLaunch()
         root.removeCallbacks(cardTimeout)
+        val destination = launchOrigin?.takeIf { it.layer === appsLayer }?.let { originTarget(it) }
+        if (destination != null && cardTarget?.matches(destination) != true) {
+            val oldTarget = cardTarget
+            cardTarget = null
+            revealTargetIfUnused(oldTarget)
+            destination.setHidden(true)
+            cardTarget = destination
+            card.anchor = destination::updateCardBounds
+        }
         val retraction = CardRetraction(card, cardTarget)
         retractingCards += retraction
         launchCard = null
@@ -2545,6 +2566,23 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     fun onNewIntent(intent: Intent, alreadyOnHome: Boolean) {
         android.util.Log.i("OneUiHome", "onNewIntent extras=" + intent.extras?.keySet() + " onHome=" + alreadyOnHome)
         val contract = GestureNavContract.fromIntent(intent)
+        // System Home gestures can briefly remove focus before delivering this intent.
+        // An open launcher surface must still dismiss even when alreadyOnHome is false.
+        if (contract == null && intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME) &&
+            !openingInputBlocked && !pendingReturnAnim &&
+            (search?.isOpen == true || state.state == StateController.State.APPS)) {
+            cancelPredictiveBack(immediate = true)
+            returnIntentGuardUntil = 0L
+            returnContractHandled = false
+            popup?.dismiss()
+            resizeFrame?.dismiss()
+            drag.cancel()
+            quickOpen?.close()
+            folders.closeNow()
+            if (search?.isOpen == true) closeSearch(toHome = true)
+            else state.goTo(StateController.State.HOME)
+            return
+        }
         val recentReturn = returningFromAppRecently()
         // A late intent from the last return can arrive while the next launch is still showing its mask.
         val newOpenInFlight = pendingReturnAnim && !hiddenSinceOpen
@@ -3103,7 +3141,16 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val origin = if (fromHome) homeSearchOrigin() else drawerSearchOrigin()
         lateinit var s: com.oneuiclone.home.ui.AppsSearch
         s = com.oneuiclone.home.ui.AppsSearch(activity, dp, { repo?.apps ?: emptyList() },
-            onLaunch = { v, a -> closeSearch(toHome = false); launch(v, a) },
+            onLaunch = { v, a ->
+                closeSearch(toHome = false)
+                layOutNow()
+                (0 until appsGrid.childCount).map { appsGrid.getChildAt(it) }
+                    .filterIsInstance<IconView>().firstOrNull { it.appInfo?.key == a.key }?.let {
+                        appsScroll.scrollTo(0, (it.top - appsScroll.height / 2 + it.height / 2).coerceAtLeast(0))
+                    }
+                searchLaunchKey = a.key
+                launch(v, a)
+            },
             configureIcon = { v, a -> setAppsIcon(v, a); v.appInfo = a; attachItem(v, null, a, true) { folderSiblings(v) } },
             sources = searchSources,
             firstPage = { model?.firstPageApps() ?: emptySet() },
