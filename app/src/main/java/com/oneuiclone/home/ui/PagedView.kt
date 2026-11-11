@@ -19,7 +19,7 @@ import kotlin.math.sin
  * Horizontal pager with One UI Home's FastRecyclerView physics (spec §9):
  * fling ≥ 500 dp/s, 40 % significant move, quintic scroller, snap duration
  * min(round(|(sin((f−0.5)·0.4712389)·W/2 + W/2) / max(1500dp/s, |v|)|·1000)·5, 900),
- * 750 ms default snap, overscroll damp 0.105 + bounce scale ≥ 0.96.
+ * 750 ms default snap, edge pull beyond half a screen + bounce scale ≥ 0.96.
  */
 open class PagedView(context: Context) : ViewGroup(context) {
 
@@ -229,9 +229,11 @@ open class PagedView(context: Context) : ViewGroup(context) {
         }
         val clamped = rawScroll.coerceIn(0f, maxScroll.toFloat())
         val damped = if (overscroll == 0f) 0f else {
-            val f = min(1f, abs(overscroll) / w)
-            val influence = Easing.CUBIC_OUT.getInterpolation(f)
-            influence * 0.105f * w * (if (overscroll < 0) -1 else 1)
+            // Continuous resistance with no hard stop at one screen of finger travel.
+            // A one-screen pull reveals about 54% of the screen; the asymptote is 72%.
+            val distance = abs(overscroll) / w
+            val influence = 0.72f * (1f - kotlin.math.exp(-distance / 0.72f))
+            influence * w * (if (overscroll < 0) -1 else 1)
         }
         scrollTo((clamped + damped).roundToInt(), 0)
         applyOverscrollScale(if (overscroll == 0f) 0f else min(1f, abs(overscroll) / w))

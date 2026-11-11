@@ -100,6 +100,7 @@ class AppsSearch(
     private val onSwipeUp: () -> Unit,
     /** Tap outside / web search: the launcher decides where the bar goes back to ([close]). */
     private val onDismiss: () -> Unit,
+    private val searchGlass: WidgetGlass? = null,
     private val onClose: () -> Unit,
 ) : FrameLayout(context) {
 
@@ -284,6 +285,7 @@ class AppsSearch(
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             setPadding(openTextStart.roundToInt(), 0, dp.dpi(16f), 0)
+            includeFontPadding = false
             gravity = Gravity.CENTER_VERTICAL
             pivotX = 0f
         }
@@ -297,7 +299,7 @@ class AppsSearch(
         glyph.pivotY = dp.dpi(24f) / 2f
         // bottom-up: apps resting on the bar, Google above them, contacts on top; fitted, never scrolled
         content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.BOTTOM
+        content.gravity = Gravity.TOP
         content.clipChildren = false
         for (box in listOf(contactsBox, web)) {
             box.orientation = LinearLayout.VERTICAL
@@ -757,20 +759,20 @@ class AppsSearch(
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /** Top of a bar of height [h] resting 12dp above a keyboard [keyboard] px tall (or the navigation bar). */
-    private fun barTop(keyboard: Float, h: Float) = dp.heightPx - maxOf(keyboard, dp.insets.bottom.toFloat()) - dp.dp(12f) - h
+    private fun barTop(keyboard: Float, h: Float) = dp.insets.top + dp.dp(12f)
 
     private fun layoutPill() {
         if (!::origin.isInitialized) return
         val o = origin
         val r = o.rect
         // Lift-Off: it reads as the bar early on (size and colour lead), while its height follows the finger
-        val g = if (isLifting) 1f - (1f - minOf(1f, f * 1.12f)).pow(2.2f) else f
+        val g = f
         val h = lerp(r.height(), dp.searchBarHeight.toFloat(), g)
         val margin = dp.dp(16f)
         val w = lerp(r.width(), dp.widthPx - 2 * margin, g)
         val own = lerp(r.top, barTop(kb, dp.searchBarHeight.toFloat()), f)
         // whichever is higher: the bar's own motion, or the keyboard pushing it up (never behind the keyboard)
-        val top = if (ime > 0) minOf(own, barTop(ime.toFloat(), h)) else own
+        val top = own
         val lp = pill.layoutParams
         if (lp.width != w.roundToInt() || lp.height != h.roundToInt()) {
             lp.width = w.roundToInt(); lp.height = h.roundToInt()
@@ -779,14 +781,14 @@ class AppsSearch(
         pill.x = lerp(r.left, margin, g)
         pill.y = top - barBounce
         pillBg.cornerRadius = h / 2f
-        pillBg.setColor(argb.evaluate(g, o.fill, colors.open) as Int)
+        pillBg.setColor(argb.evaluate(g, o.fill, if (o.glass != null) o.fill else colors.homePill) as Int)
         pillBg.setStroke(dp.dpi(1f), argb.evaluate(g, o.stroke, colors.stroke) as Int)
         // the pill's own look at the start and end: its glass under the fill, and its ink fading into the bar's
-        pillGlass = o.glass
-        val ink = argb.evaluate(g, o.ink ?: colors.hint, colors.hint) as Int
+        pillGlass = o.glass ?: searchGlass
+        val ink = o.ink ?: colors.hint
         glyph.color = ink
         field.setHintTextColor(ink)
-        pill.elevation = lerp(o.elevation, dp.dp(8f), g)              // search_bar_elevation
+        pill.elevation = o.elevation              // search_bar_elevation
         val gs = lerp(o.glyphBox, openGlyphBox, g) / openGlyphBox
         glyph.scaleX = gs; glyph.scaleY = gs
         glyph.translationX = lerp(o.glyphLeft, openGlyphLeft, g) - openGlyphLeft
@@ -799,8 +801,11 @@ class AppsSearch(
     /** Results end just above where the bar settles. */
     private fun updateContentInset() {
         val lp = content.layoutParams as LayoutParams
-        val m = (dp.heightPx - barTop(kbTarget, dp.searchBarHeight.toFloat()) + dp.dp(8f)).roundToInt()
-        if (lp.bottomMargin != m) { lp.bottomMargin = m; content.layoutParams = lp }
+        val top = (barTop(kbTarget, dp.searchBarHeight.toFloat()) + dp.searchBarHeight + dp.dp(12f)).roundToInt()
+        val bottom = (maxOf(kbTarget, dp.insets.bottom.toFloat()) + dp.dp(12f)).roundToInt()
+        if (lp.topMargin != top || lp.bottomMargin != bottom) {
+            lp.topMargin = top; lp.bottomMargin = bottom; content.layoutParams = lp
+        }
     }
 
     private fun rememberedKeyboard(): Float =

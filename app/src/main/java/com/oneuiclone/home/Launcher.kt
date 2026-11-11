@@ -3119,6 +3119,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             // with Swipe down for search a swipe up undoes it (the Apps screen is a swipe up from Home)
             onSwipeUp = { if (prefs.swipeDownSearch) closeSearch(lift = true) else searchToApps() },
             onDismiss = { closeSearch() },
+            searchGlass = widgetGlass,
         ) {
             // the bar has landed exactly on its pill: swap them in the same frame
             searchPill.visibility = View.VISIBLE
