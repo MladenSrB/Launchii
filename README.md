@@ -4,16 +4,19 @@ A from-scratch Android launcher (Kotlin, View-based, no third-party launcher cod
 
 ## Download
 
-**[Launchii.apk](https://github.com/deciocrytek/Launchii/releases/latest/download/Launchii.apk)**: always the latest
-release. Open it on your phone and allow installs from your browser. Updates install over the previous version.
+**[Launchii.apk](https://github.com/MladenSrB/Launchii/releases/latest/download/Launchii.apk)**
+is the latest signed build from this repository. Every push to `main` builds and
+publishes a new APK automatically through GitHub Actions.
 
-When a newer release is out, Home shows an **Update** pill left of the Search pill (it checks GitHub once a day).
-Tapping it downloads the APK, checks it against the release's size and sha256, and installs it. The first time,
-Android asks you to allow installs from Launchii; after that, updates go through without asking.
+Install this APK once to switch to this repository's update channel. When Home
+comes to the foreground, it checks GitHub at most every six hours and shows an
+**Update** pill for a newer version. Tap it to download and install the update;
+Android may ask you to allow installs from Launchii or confirm installation.
+The download is checked against the release's size and sha256 when available.
 
-Publishing a new build (same link): bump `versionName`/`versionCode` in `app/build.gradle.kts`, then run
-`scripts/publish-apk.sh`. It has to be signed with the same key as the installed copies (`signing/`), so publish
-from the machine that has it, not from CI.
+See [automatic update setup](docs/automatic-updates.md) for signing secrets,
+version numbering, and local build instructions. Updates must use the same
+signing certificate as the installed APK.
 
 ## Build and install on the Pixel 10 Pro XL
 
