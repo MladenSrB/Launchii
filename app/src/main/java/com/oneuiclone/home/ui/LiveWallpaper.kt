@@ -27,6 +27,13 @@ import kotlin.math.max
 object LiveWallpaper {
     /** The zoom the engines draw (1 = rest, as the system shows an image wallpaper). Main thread. */
     var zoom = 1f; private set
+    @Volatile var transitionBlurRadius = 0f; private set
+
+    fun setTransitionBlur(radius: Float) {
+        if (transitionBlurRadius == radius) return
+        transitionBlurRadius = radius
+        engines.forEach { it.requestDraw() }
+    }
     /** Changed on the main thread; also read by Home's wallpaper loader ([isActive]). */
     private val engines = java.util.concurrent.CopyOnWriteArraySet<LiveWallpaperService.ZoomEngine>()
     /** A zoom to take once the wallpaper is out of sight ([park]). */
@@ -336,7 +343,21 @@ class LiveWallpaperService : WallpaperService() {
                     matrix.postTranslate((w - b.width * fit) / 2f, (h - b.height * fit) / 2f)
                     matrix.postScale(z, z, w / 2f, h / 2f)
                     c.drawColor(Color.BLACK)
-                    if (effect == null) c.drawBitmap(b, matrix, paint) else drawEffect(c, b, effect, w, h)
+                    val radius = if (locked || isPreview) 0f else LiveWallpaper.transitionBlurRadius
+                    if (radius > 0.1f) {
+                        transitionNode.setPosition(0, 0, frame.width(), frame.height())
+                        val scene = transitionNode.beginRecording()
+                        try {
+                            if (effect == null) scene.drawBitmap(b, matrix, paint) else drawEffect(scene, b, effect, w, h)
+                        } finally {
+                            transitionNode.endRecording()
+                        }
+                        transitionNode.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
+                            radius, radius, android.graphics.Shader.TileMode.CLAMP))
+                        c.drawRenderNode(transitionNode)
+                    } else {
+                        if (effect == null) c.drawBitmap(b, matrix, paint) else drawEffect(c, b, effect, w, h)
+                    }
                 } finally {
                     holder.unlockCanvasAndPost(c)
                 }
@@ -345,6 +366,7 @@ class LiveWallpaperService : WallpaperService() {
 
         // ---- Opening effects (drawing thread, except [effectDrawing]) ----
         private val blurNode = android.graphics.RenderNode("open-effect")
+        private val transitionNode = android.graphics.RenderNode("app-transition-wallpaper")
         private val fxPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
         private val scanPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
             // Scan's frosted band: a little dimmer and richer under its haze

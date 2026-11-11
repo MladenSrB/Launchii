@@ -18,13 +18,44 @@ class TouchRipple(private val samsungPxScale: Float) {
         const val DELAY_PER_UNIT = 6L
     }
 
-    private class Entry(val view: View, val anim: ValueAnimator, val baseX: Float, val baseY: Float)
+    private class Entry(val view: View, val dx: Float, val dy: Float) {
+        lateinit var anim: ValueAnimator
+        private var fraction = 0f
+
+        fun moveTo(next: Float) {
+            val change = next - fraction
+            view.translationX += dx * change
+            view.translationY += dy * change
+            fraction = next
+        }
+
+        fun reset() {
+            anim.cancel()
+            moveTo(0f)
+        }
+    }
 
     private val active = ArrayList<Entry>()
+    private val pulses = ArrayList<Entry>()
 
     /** @param tx,ty touch point in screen coordinates. */
     fun start(views: List<View>, tx: Float, ty: Float) {
-        reset()
+        active.forEach { it.reset() }
+        active.clear()
+        animateWave(views, tx, ty, pulse = false)
+    }
+
+    /** STOP / REVERSE: play the press back without changing the app return wave. */
+    fun reverse() {
+        for (e in active) {
+            if (e.anim.isStarted) e.anim.reverse()
+            else e.reset()
+        }
+    }
+
+    fun pulse(views: List<View>, tx: Float, ty: Float) = animateWave(views, tx, ty, pulse = true)
+
+    private fun animateWave(views: List<View>, tx: Float, ty: Float, pulse: Boolean) {
         val loc = IntArray(2)
         for (v in views) {
             if (!v.isShown) continue
@@ -33,56 +64,30 @@ class TouchRipple(private val samsungPxScale: Float) {
             val cy = loc[1] + v.height * v.scaleY / 2f - v.translationY
             val d = hypot(cx - tx, cy - ty)
             if (d < 1f) continue
-            val ux = (cx - tx) / d
-            val uy = (cy - ty) / d
-            val units = d / DISTANCE_UNIT                 // our px; displacement = d / 50 (density independent ratio)
-            val dx = -units * ux
-            val dy = -units * uy
-            val baseX = v.translationX
-            val baseY = v.translationY
-            val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            val e = Entry(v, (tx - cx) / DISTANCE_UNIT, (ty - cy) / DISTANCE_UNIT)
+            e.anim = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = DURATION
-                interpolator = Easing.RIPPLE
                 startDelay = (DELAY_PER_UNIT * (d / (DISTANCE_UNIT * samsungPxScale))).toLong()
+                interpolator = if (pulse) Easing.LINEAR else Easing.RIPPLE
                 addUpdateListener {
                     val f = it.animatedValue as Float
-                    v.translationX = baseX + dx * f
-                    v.translationY = baseY + dy * f
+                    e.moveTo(if (pulse) Easing.RIPPLE.getInterpolation(minOf(f, 1f - f)) else f)
                 }
+                if (pulse) addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        e.moveTo(0f)
+                        pulses.remove(e)
+                    }
+                })
             }
-            active += Entry(v, anim, baseX, baseY)
-            anim.start()
+            if (pulse) pulses += e else active += e
+            e.anim.start()
         }
-    }
-
-    /** STOP / REVERSE: play back from wherever each item currently is. */
-    fun reverse() {
-        for (e in active) {
-            if (e.anim.isStarted && e.anim.isRunning) {
-                e.anim.reverse()
-            } else if (e.anim.isStarted) {
-                e.anim.reverse()
-            } else {
-                e.anim.cancel()
-                e.view.translationX = e.baseX
-                e.view.translationY = e.baseY
-            }
-        }
-    }
-
-    /** One-shot "release" wave from a point (app returning to its icon): out and back. */
-    fun pulse(views: List<View>, tx: Float, ty: Float) {
-        start(views, tx, ty)
-        val first = active.firstOrNull()?.view ?: return
-        first.postDelayed({ reverse() }, DURATION / 2)
     }
 
     fun reset() {
-        for (e in active) {
-            e.anim.cancel()
-            e.view.translationX = e.baseX
-            e.view.translationY = e.baseY
-        }
+        active.forEach { it.reset() }
         active.clear()
+        pulses.toList().forEach { it.reset() }
     }
 }

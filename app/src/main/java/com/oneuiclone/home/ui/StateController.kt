@@ -39,6 +39,7 @@ class StateController(
     private var toApps = true
     val isTransitioning get() = anim?.isRunning == true || dragging
     private var dragging = false
+    private var predictiveBack = false
 
     /** The next transition is Lift-Off (set before [begin]; cleared when it settles). */
     var liftHome = false
@@ -48,6 +49,7 @@ class StateController(
 
     fun begin(towardApps: Boolean) {
         anim?.cancel()
+        predictiveBack = false
         toApps = towardApps
         dragging = true
         apps.visibility = View.VISIBLE
@@ -61,6 +63,23 @@ class StateController(
     /** Raw finger progress (no interpolation while dragging, like gotoScreenWithAnimation(ongoing=false)). */
     fun drag(progress: Float) {
         apply(progress.coerceIn(0f, 1f))
+    }
+
+    /** Catch an Apps-to-Home transition, including a cancelled gesture still settling back. */
+    fun beginBackGesture(): Float {
+        val start = if (!toApps && !liftHome) f else 0f
+        begin(false)
+        predictiveBack = true
+        apply(start)
+        return start
+    }
+
+    /** Navigation commits only when the gesture is invoked; cancellation returns to the Apps screen. */
+    fun finishBackGesture(commit: Boolean) {
+        dragging = false
+        val end = if (commit) 1f else 0f
+        val duration = (220f * abs(end - f)).toLong().coerceAtLeast(80L)
+        animateTo(end, duration, Easing.APP_RETURN)
     }
 
     /**
@@ -101,6 +120,8 @@ class StateController(
 
     fun setImmediate(target: State) {
         anim?.cancel()
+        dragging = false
+        predictiveBack = false
         toApps = target == State.APPS
         apply(1f)
         finish(true)
@@ -129,6 +150,7 @@ class StateController(
         apps.setLayerType(View.LAYER_TYPE_NONE, null)
         home.setRenderEffect(null)
         liftHome = false
+        predictiveBack = false
         // settle exactly
         setScreen(apps, showApps)
         setScreen(home, !showApps)
@@ -148,6 +170,17 @@ class StateController(
 
     private fun apply(progress: Float) {
         f = progress
+        if (predictiveBack) {
+            // Reveal Home from the first movement, rather than the normal transition's delayed fade-in.
+            home.alpha = progress
+            home.scaleX = 1.06f - 0.06f * progress; home.scaleY = home.scaleX
+            home.translationY = -transitionY() * 0.25f * (1f - progress)
+            apps.alpha = 1f - progress
+            apps.scaleX = 1f - 0.08f * progress; apps.scaleY = apps.scaleX
+            apps.translationY = transitionY() * 0.35f * progress
+            background.set(BackgroundController.Kind.APPS, 1f - progress)
+            return
+        }
         if (liftHome) { applyLift(if (toApps) f else 1f - f); return }
         val ty = transitionY()
         val showing = if (toApps) apps else home

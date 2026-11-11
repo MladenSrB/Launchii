@@ -56,6 +56,128 @@ Settings live in edit mode (pinch, or long-press empty space) › Settings, or i
 | Apps screen | 8.5 floating 244×52dp search pill + ⋮ button, vertically scrolling A–Z grid; search above the keyboard with Google suggestions, results get the full long-press menu |
 | Other | badges (`#F54D13`, 32.7% circle at 0.8/0.2), wallpaper-adaptive dark labels and status bar, dark mode, settings screen, hardware layers during transitions |
 
+## Foldables and resizable windows
+
+Launchii adapts to the current window bounds when moving between the cover and inner display.
+Home keeps the same saved grid coordinates, with a centred workspace (up to 840dp), a centred dock
+(up to 520dp), and capped icon sizes. Apps keeps the configured column count on both displays:
+four per row by default, without automatic expansion. **Rotate Home screen** is off by default
+and follows the user's rotation setting when enabled.
+
+Resizing retains the Home page, the first visible app row, and an open search's query. Active drags,
+folder panels, edit mode, and resize handles close before rebuilding their geometry. System bars
+and display cutouts contribute to safe padding. On wide windows, widgets fit inside their allocated cells
+with their span aspect ratio preserved and their content centred; the size reported to providers matches
+these actual content bounds. Cancelling or dismissing a resize gesture does not save new spans.
+This is window-size adaptation; hinge avoidance,
+tabletop posture layouts, and separate cover/inner-display workspace arrangements are not implemented.
+
+Manual checks on a foldable or resizable emulator:
+
+- Fold and unfold on a non-first Home page; check the page and saved item positions stay the same.
+- Scroll the Apps list, then unfold; check the previously visible app remains in the visible row.
+- Type a search, then fold/unfold; check the text and results return and the keyboard works.
+- Resize during an icon/widget drag, folder animation, or edit mode; check no stale overlay remains.
+- Check four Apps columns on both cover/inner displays, then test rotation, landscape, and cutout padding.
+- Check widgets update their content for their new physical size without losing their widget IDs.
+
+## App transitions and click handling
+
+App launches progressively blur the launcher scene (up to 28dp); returning Home clears the blur over
+420ms, with the Home grid, widgets and dock shrinking together from 1.14× to 1× over 520ms.
+Zoom In enlarges the desktop to 1.22×, Smooth shrinks it to 0.80×, and wallpaper zoom reaches 1.12×.
+App motion uses iOS-inspired curves with a prompt response and soft settling tail; Zoom In shares a
+680ms, lightly overshooting spring across the card, desktop and wallpaper. These are tuned approximations,
+not measured iOS timing values. The effect is separate from drawer/search blur. The wallpaper follows
+the same blur radius: static copies stay visible during the transition, Launchii's live wallpaper renders
+the blur in its own surface (excluding the lock screen and previews), and wallpapers without a local copy
+use cross-window blur when the device allows it. Low-RAM devices
+and devices with system animations disabled skip this effect.
+
+Non-card launches retain the original system-close completion callback and 400ms fallback.
+Zoom In waits for the full opening-mask expansion animation to finish normally and its final frame
+to be drawn before dispatching the native app launch. It no longer dispatches at the screen centre or
+before predicted coverage. Native app starts request zero system enter/exit animations. Current-profile
+app icons, widget activity senders, contacts and settings pages also use FLAG_ACTIVITY_NO_ANIMATION;
+profile and shortcut launches use their public APIs with zero-animation options and no icon-origin bounds.
+The launcher mask, desktop motion, blur and mask fade remain enabled. Target apps' own content animations
+and system/profile overrides cannot be guaranteed to follow these requests.
+The mask is an extension of the displayed icon: samples come only from the outer opaque contour,
+are smoothed around that perimeter, and form a directional gradient field rather than a dominant-color fill.
+In system dark mode, the extended mask is darkened by 85% (15% RGB brightness); its alpha and
+foreground icon remain intact. The original icon remains in the centre. Empty transparent directions borrow adjacent perimeter colors.
+Palettes are cached per bitmap; unreadable icons use a fallback color.
+The expanding/retracting mask has speed-responsive blur up to 14dp, clearing at both endpoints;
+the fully expanded handoff frame remains sharp. Once the native launch is dispatched, the mask itself
+fades out and blurs up to 18dp over 200ms.
+Retracting or detaching cancels and restores this mask effect. Low-RAM devices omit the extra blur,
+and disabled system animations skip this exit effect. It does not apply blur to the target app's content.
+Home, screen-off, cancelled cards, new requests and destruction invalidate a pending mask launch.
+The experimental frame-dispatch queue, frozen intermediate state and late-intent
+suppression have been rolled back. Blur, the return shrink, foldable layouts and unlock reveal remain.
+Return targets use final screen coordinates, and the floating icon hands back to the real icon only after
+both the system close and desktop scaling finish. The landing icon is excluded from the return ripple.
+Detached icon/widget origins fall back to the normal zoom. Deep shortcuts share this launch path and report
+failures instead of silently swallowing them. Widget IntentSender launches preserve their original options
+and include the Android 14+ sender opt-in (visible-only on Android 16+).
+
+Home screen settings also includes **Unlock animation** (on by default). After the system keyguard is
+dismisses into Home, icons, widgets and Dock items fade in and expand outwards with a short stagger.
+The reveal starts at authentication/foreground entry without waiting for input focus, so it can overlap
+the system window transition. Late user-present/focus/entry-complete notifications skip the reveal instead
+of starting a second animation after the system transition. Secure and non-secure swipe locks use their
+respective authentication/dismissal state. This animates only the launcher, not the lock screen itself. Touch, screen-off and window resizing cancel
+and restore the reveal; system-disabled animations are respected. Unlocking into another app must not
+cause a delayed reveal when returning Home later.
+
+Additional device checks:
+
+- Lock/unlock directly into Home using PIN and biometrics; check a single reveal and try tapping mid-reveal.
+- Unlock into another app, then return Home after a few seconds; check no stale reveal plays.
+- Fold/unfold a 2×2 widget repeatedly, including during a resize gesture; check its saved spans stay 2×2.
+
+- Open/return from a cold and warm app using Home, Apps, folders, and search; check blur clears completely.
+- With Zoom In, launch icons from different rows and the dock on both foldable displays; check native
+  dispatch waits for the full expansion and the final drawn frame. Cancel midway and check no app starts.
+- Check directional perimeter extensions with colored, white-tray, themed, transparent and monochrome icons;
+  centre artwork must not change the sampled outer-ring palette.
+- Check the app appears after the mask fully expands without a second system zoom, including warm/cold
+  starts, shortcuts, widget links and another user profile.
+- At early/middle/late stages of a return, tap a different app, widget or shortcut: compare behavior
+  with the original launch handling, including its system-close wait and fallback.
+- Repeat with Zoom In, Smooth and each installed live-wallpaper effect; check their original effects play.
+- Press Home before a launched app covers the desktop, then tap another icon while the card retracts.
+- Return from an app that closes immediately; check the desktop and launch card recover normally.
+- Test widget activity links and non-activity actions such as play/pause, including after a RemoteViews update.
+- Cancel a widget drag or resize/fold during a long press; check the next normal tap still works.
+- Try disabled/deleted shortcuts and invalid widget actions; check a failure is visible and Home recovers.
+
+## Predictive Back
+
+Launchii explicitly opts in to Android's system Back APIs. On Android 14+, the Apps drawer follows
+`OnBackAnimationCallback` progress: it shrinks/fades as Home appears, commits only on invocation,
+and animates back to the same drawer and scroll position on cancellation. A new gesture can catch a
+cancelled gesture while it is settling. Screen locking, app launching and window resizing clear an active
+preview. Android 13 keeps the existing invoked-only Back path, including button navigation.
+
+Search, folders and other launcher sheets retain their existing Back actions; their custom interactive
+previews are not implemented. Settings activities retain platform Back handling, allowing system
+back-to-home/cross-activity/cross-task previews when supported by the OS. The terminal Home screen
+keeps its no-op Back behavior. Other apps must support predictive Back themselves; Launchii cannot
+opt another package in or replace the system's task-window animation.
+External-app back-to-home previews also depend on system launcher/Quickstep integration; enabling
+callbacks in Launchii alone does not provide the stock launcher's remote window animation.
+
+Device checks:
+
+- On Android 14+, swipe Back partway in Apps and cancel: check the drawer, scroll position and blur recover.
+- Commit the same gesture: Home should appear smoothly; repeat cancellation and re-grabbing quickly.
+- Rotate/fold, lock, or launch an app during a preview; check no partial transform is left behind.
+- Check Back with an open search, folder, widget picker or popup still performs that surface's normal action.
+- Check system predictive Back from a settings page and a compatible external app; on Android 13/14,
+  system back-to-home previews may require the Predictive Back developer option.
+- Check three-button navigation remains functional and Back on Home does not close the launcher.
+
 ## Platform limits on Pixel (not fixable from a launcher)
 
 - **Recents** is Pixel Launcher's Quickstep. A third-party launcher can't replace it without root.

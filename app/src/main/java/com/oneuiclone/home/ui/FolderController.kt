@@ -317,6 +317,14 @@ class FolderController(
         if (isOpen) close(animate = false) else if (anim?.isRunning == true && !dragging) finishClose()
     }
 
+    /** Complete a folder opening while its window is covered, keeping the panel and its current page. */
+    fun settleOpen() {
+        if (isOpen) anim?.takeIf { it.isRunning }?.end()
+    }
+
+    fun appIcon(itemId: Long): IconView? =
+        panel?.takeIf { isOpen }?.gridIcons()?.firstOrNull { it.item?.id == itemId }
+
     /** Where the last frame left the animation, so a reversal picks up from there instead of jumping. */
     private var shownE = 0f
     private var shownF = 0f

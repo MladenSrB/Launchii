@@ -14,15 +14,26 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * Zoom In open (iOS-style): the tapped icon grows into a card in the app's splash colour, its icon growing into
- * the splash's 160 dp circle, over a dim of Home. The card aims at [endScale] of the screen (past its edges) so it
- * covers the screen well before the spring settles. It ends on what Android's starting window shows, so the
- * system's crossfade to the app lands on a near-identical frame.
+ * Zoom In open: the tapped icon grows into a card filled by its outer contour's directional color extension.
+ * Its icon grows into a 160 dp circle, over a dim of Home. The card aims at [endScale] of the screen (past its edges) so it
+ * covers the screen before the spring settles. The native app launch waits for the expansion animator
+ * to finish normally and for the final expanded frame to be drawn.
  */
 class LaunchCard(context: Context) : View(context) {
     /** The icon on screen when tapped, in this view's coordinates. */
     val from = RectF()
+    var anchor: ((RectF) -> Unit)? = null
     var color = Color.WHITE
+    var edgeColors: com.oneuiclone.home.icons.IconColor.EdgeColors? = null
+        set(value) {
+            field = value
+            edgeShader = value?.let { android.graphics.BitmapShader(it.texture, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP) }
+            if (value != null) color = value.average
+            invalidate()
+        }
+    private var edgeShader: android.graphics.BitmapShader? = null
+    private val shaderMatrix = android.graphics.Matrix()
+    private val textureRect = RectF()
     /**
      * The card's opacity at the start, below 1 for a see-through (glass) icon or a plateless (Minimal) one: the card
      * turns solid over the first part of the grow, so it reads as the icon itself opening rather than a card drawn
@@ -63,13 +74,40 @@ class LaunchCard(context: Context) : View(context) {
      * the full icon fading back into Home's on the way, and taps go through to Home again.
      */
     var retracting = false
+    /** Set by the opening animator only after it finishes normally. */
+    var expansionFinished = false
+    /** Called after the fully expanded final frame has been drawn. */
+    var onExpanded: (() -> Unit)? = null
 
     /** Spring progress 0 → 1 (may overshoot a little). */
     var progress = 0f
-        set(v) { field = v; invalidate() }
+        set(v) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = now - lastMotionAt
+            val speed = if (lastMotionAt != 0L && dt in 1L..100L)
+                (kotlin.math.abs(v - field) / dt * 1000f / 4f).coerceIn(0f, 1f) else 0f
+            field = v
+            lastMotionAt = now
+            // Follow the actual spring speed, with clear endpoints for the icon and app handoff.
+            val envelope = kotlin.math.sin(Math.PI * v.coerceIn(0f, 1f)).toFloat().coerceAtLeast(0f)
+            if (exitAnimation == null) {
+                motionBlur = if (envelope < 0.01f) 0f else
+                    (motionBlur * 0.4f + speed * 0.6f).coerceAtMost(envelope)
+                applyCardBlur(if (android.animation.ValueAnimator.areAnimatorsEnabled())
+                    motionBlur * motionBlurRadius else 0f)
+            }
+            invalidate()
+        }
 
     /** Whether the card is light enough to want dark status / navigation bar icons. */
-    val isLight get() = Color.luminance(color) > 0.5f
+    private val isDarkMode get() = resources.configuration.uiMode and
+        android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    val isLight get() = !isDarkMode && Color.luminance(color) > 0.5f
+
+    // Darken only the extended mask by 85%; keep its alpha and the foreground icon intact.
+    private val darkMaskFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply {
+        setScale(0.15f, 0.15f, 0.15f, 1f)
+    })
 
     private val dimPaint = Paint().apply { color = Color.BLACK }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -82,6 +120,7 @@ class LaunchCard(context: Context) : View(context) {
     private val shapeClip = Path()
 
     override fun onDraw(canvas: Canvas) {
+        anchor?.invoke(from)
         val p = progress
         val pc = p.coerceIn(0f, 1f)
         dimPaint.alpha = (DIM * pc * 255).toInt()
@@ -95,6 +134,26 @@ class LaunchCard(context: Context) : View(context) {
         val c = if (dark == null) color else androidx.core.graphics.ColorUtils.blendARGB(dark, color,
             ((pc - DARK_HOLD) / DARK_TURN).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) })
         cardPaint.color = c
+        cardPaint.shader = edgeShader
+        edgeColors?.let {
+            textureRect.set(0f, 0f, it.texture.width.toFloat(), it.texture.height.toFloat())
+            shaderMatrix.setRectToRect(textureRect, rect, android.graphics.Matrix.ScaleToFit.FILL)
+            edgeShader?.setLocalMatrix(shaderMatrix)
+        }
+        val blend = ((pc - DARK_HOLD) / DARK_TURN).coerceIn(0f, 1f)
+        val tintAlpha = ((1f - blend * blend * (3f - 2f * blend)) * 255).toInt()
+        cardPaint.colorFilter = if (dark != null && tintAlpha > 0) {
+            // Combine plate tint and dark-mode dimming in one public color-matrix filter.
+            val tint = tintAlpha / 255f
+            val brightness = if (isDarkMode) 0.15f else 1f
+            val scale = (1f - tint) * brightness
+            android.graphics.ColorMatrixColorFilter(floatArrayOf(
+                scale, 0f, 0f, 0f, Color.red(dark) * tint * brightness,
+                0f, scale, 0f, 0f, Color.green(dark) * tint * brightness,
+                0f, 0f, scale, 0f, Color.blue(dark) * tint * brightness,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+        } else if (isDarkMode) darkMaskFilter else null
         val shown = if (fadeIn) (pc / FADE_IN).coerceAtMost(1f) else 1f
         val solid = lerp(fromAlpha, 1f, (pc / FROM_ALPHA_GONE).coerceAtMost(1f))
         cardPaint.alpha = (Color.alpha(c) * shown * solid).toInt()
@@ -144,6 +203,55 @@ class LaunchCard(context: Context) : View(context) {
             if (bigAlpha < 1f) { canvas.restore(); postInvalidateOnAnimation() }
         }
         canvas.restore()
+        if (!retracting && expansionFinished && cardPaint.alpha == 255 && onExpanded != null) {
+            val ready = onExpanded
+            onExpanded = null
+            if (ready != null) post { if (!retracting && isAttachedToWindow) ready() }
+        }
+    }
+
+    private var exitAnimation: android.animation.ValueAnimator? = null
+    private var lastMotionAt = 0L
+    private var motionBlur = 0f
+    private val exitBlurRadius = if (context.getSystemService(android.app.ActivityManager::class.java).isLowRamDevice)
+        0f else 18f * resources.displayMetrics.density
+    private val motionBlurRadius = exitBlurRadius * (14f / 18f)
+
+    private fun applyCardBlur(radius: Float) {
+        setRenderEffect(if (radius < 0.1f) null else android.graphics.RenderEffect.createBlurEffect(
+            radius, radius, android.graphics.Shader.TileMode.CLAMP))
+    }
+
+    /** Blur/fade the launcher-owned mask as the native app starts; never modifies the target app window. */
+    fun beginExit() {
+        if (retracting || exitAnimation != null || !android.animation.ValueAnimator.areAnimatorsEnabled()) return
+        val fromAlpha = alpha
+        exitAnimation = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 200L
+            interpolator = com.oneuiclone.home.motion.Easing.APP_RETURN
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                alpha = fromAlpha * (1f - f)
+                applyCardBlur(exitBlurRadius * f)
+            }
+            start()
+        }
+    }
+
+    fun cancelExit(restore: Boolean = true) {
+        exitAnimation?.cancel()
+        exitAnimation = null
+        lastMotionAt = 0L
+        motionBlur = 0f
+        if (restore) {
+            alpha = 1f
+            setRenderEffect(null)
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        cancelExit()
+        super.onDetachedFromWindow()
     }
 
     /** Covers Home until it's gone: taps mustn't reach the icons underneath (they may again once it's shrinking back). */

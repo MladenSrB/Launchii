@@ -60,6 +60,7 @@ class ShortcutLoader(private val context: Context, private val iconSizePx: Int) 
                 .setActivity(app.key.component)
                 .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST)
             (launcherApps.getShortcuts(q, app.user) ?: emptyList())
+                .filter { it.isEnabled }
                 .sortedWith(compareBy({ if (it.isDynamic) 1 else 0 }, { it.rank }))
                 .take(4)
                 .mapNotNull { sc ->

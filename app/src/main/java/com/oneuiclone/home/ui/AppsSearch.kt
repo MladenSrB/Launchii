@@ -871,6 +871,27 @@ class AppsSearch(
         animateTo(0f) { onClose() }
     }
 
+    /** Retain the query while replacing geometry after a fold or window resize. */
+    fun releaseForResize(): String {
+        val query = field.text.toString()
+        isLifting = false
+        imeBlendAnim?.cancel()
+        imeCancel?.cancel()
+        imeControl?.let { if (it.isReady) it.finish(false) }
+        shutDown()
+        // Remove completion callbacks: an old morph must not change the rebuilt screen.
+        anim?.removeAllListeners(); anim?.cancel()
+        kbAnim?.cancel()
+        content.animate().cancel()
+        field.animate().cancel()
+        return query
+    }
+
+    fun restoreQuery(query: String) {
+        field.setText(query)
+        field.setSelection(field.length())
+    }
+
     /** No longer open: pending work stops and the keyboard goes down. */
     private fun shutDown() {
         isOpen = false

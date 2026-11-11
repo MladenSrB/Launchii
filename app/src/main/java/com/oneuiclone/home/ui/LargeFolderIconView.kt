@@ -22,9 +22,13 @@ class LargeFolderIconView(context: Context, dp: DeviceProfile) : FolderIconView(
 
     var apps: List<Pair<Bitmap, Any>> = emptyList()
         set(v) { field = v; previews = v.map { it.first }; invalidate() }
-    /** Slot not drawn while an app closes into it (its surface stands in). */
-    var hiddenSlot = -1
-        set(v) { field = v; invalidate() }
+    /** Slots represented by independent app animation surfaces. */
+    private val animatedSlots = mutableSetOf<Int>()
+
+    fun setSlotHidden(slot: Int, hidden: Boolean) {
+        val changed = if (hidden) animatedSlots.add(slot) else animatedSlots.remove(slot)
+        if (changed) invalidate()
+    }
 
     private val slot = RectF()
     private val pad get() = iconSize * 0.075f
@@ -79,7 +83,7 @@ class LargeFolderIconView(context: Context, dp: DeviceProfile) : FolderIconView(
         if (previewAlpha > 0f) {
             bmpPaint.alpha = (255 * previewAlpha).toInt()
             val slots = if (hasStack) 4 else minOf(4, previews.size)
-            for (i in 0 until slots) if (i != hiddenSlot && i !in hiddenPreviews) drawSlot(canvas, i)
+            for (i in 0 until slots) if (i !in animatedSlots && i !in hiddenPreviews) drawSlot(canvas, i)
         }
         canvas.restore()
     }

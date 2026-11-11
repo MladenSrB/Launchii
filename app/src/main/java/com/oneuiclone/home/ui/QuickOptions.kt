@@ -4,7 +4,6 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.LauncherApps
 import android.content.pm.ShortcutInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -12,7 +11,6 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
-import android.os.Process
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -60,6 +58,7 @@ class QuickOptionPopup(
     onAppInfo: (() -> Unit)?,
     /** Captures what's behind the card asynchronously; the card turns to blurred glass when it arrives. */
     private val backdrop: ((Rect, (Bitmap) -> Unit) -> Unit)? = null,
+    private val onShortcut: (ShortcutInfo) -> Unit,
 ) : FrameLayout(context) {
 
     private val night = iconFactory.isNight()
@@ -124,11 +123,10 @@ class QuickOptionPopup(
                     isClickable = true
                     background = recoilBackground()
                     setOnClickListener {
-                        try {
-                            context.getSystemService(LauncherApps::class.java)
-                                .startShortcut(sc.`package`, sc.id, null, null, sc.userHandle ?: Process.myUserHandle())
-                        } catch (_: Exception) {}
-                        dismiss()
+                        if (!isDismissing) {
+                            dismiss()
+                            onShortcut(sc)
+                        }
                     }
                 }
                 row.addView(BitmapIconView(context, icon), LinearLayout.LayoutParams(dp.dpi(26f), dp.dpi(26f)))

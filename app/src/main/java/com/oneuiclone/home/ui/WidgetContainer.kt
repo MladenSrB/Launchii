@@ -11,12 +11,14 @@ import kotlin.math.abs
 
 /** Hosts an AppWidgetHostView in a cell span and detects long-press over it (CheckLongPressHelper). */
 @SuppressLint("ViewConstructor")
-class WidgetContainer(context: Context, val item: HomeItem.Widget, child: View, pad: Int) : FrameLayout(context) {
+class WidgetContainer(context: Context, val item: HomeItem.Widget, child: View, pad: Int,
+                      contentSize: Pair<Int, Int>? = null) : FrameLayout(context) {
     var onLongPress: ((WidgetContainer) -> Unit)? = null
     /** After the long-press, moving past the slop drags the widget (raw screen coordinates). */
     var onDragStart: ((WidgetContainer, Float, Float) -> Boolean)? = null
     var onDragMove: ((Float, Float) -> Unit)? = null
     var onDragEnd: (() -> Unit)? = null
+    var onDragCancel: (() -> Unit)? = null
     private var dragging = false
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var dx = 0f
@@ -27,7 +29,8 @@ class WidgetContainer(context: Context, val item: HomeItem.Widget, child: View, 
     init {
         setPadding(pad, pad, pad, pad)
         clipToPadding = false
-        addView(child, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(child, if (contentSize == null) LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            else LayoutParams(contentSize.first, contentSize.second, android.view.Gravity.CENTER))
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
@@ -37,6 +40,14 @@ class WidgetContainer(context: Context, val item: HomeItem.Widget, child: View, 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> removeCallbacks(lp)
         }
         return fired
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(lp)
+        if (dragging) onDragCancel?.invoke()
+        dragging = false
+        fired = false
+        super.onDetachedFromWindow()
     }
 
     /**
@@ -55,7 +66,12 @@ class WidgetContainer(context: Context, val item: HomeItem.Widget, child: View, 
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(lp)
-                if (dragging) { dragging = false; onDragEnd?.invoke() }
+                if (dragging) {
+                    dragging = false
+                    if (event.actionMasked == MotionEvent.ACTION_CANCEL) onDragCancel?.invoke() else onDragEnd?.invoke()
+                }
+                fired = false
+                parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
         return true

@@ -34,6 +34,7 @@ class WidgetResizeFrame(
 ) : View(context) {
 
     private val rect = RectF(cellRect(item.x, item.y, item.sx, item.sy))
+    private var dismissing = false
     private var handle = -1                   // 0 left, 1 top, 2 right, 3 bottom
     private var lastX = 0f
     private var lastY = 0f
@@ -77,6 +78,7 @@ class WidgetResizeFrame(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(ev: MotionEvent): Boolean {
+        if (dismissing) return false
         val hit = dp.dp(28f)
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -102,7 +104,15 @@ class WidgetResizeFrame(
                 }
                 invalidate()
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (handle >= 0) { snap(); handle = -1 }
+            MotionEvent.ACTION_UP -> if (handle >= 0) {
+                snap(); handle = -1
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                handle = -1
+                animateTo(RectF(cellRect(item.x, item.y, item.sx, item.sy)))
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
         return true
     }
@@ -142,6 +152,10 @@ class WidgetResizeFrame(
     }
 
     fun dismiss() {
+        if (dismissing) return
+        dismissing = true
+        handle = -1
+        parent?.requestDisallowInterceptTouchEvent(false)
         animate().alpha(0f).setDuration(150).withEndAction { (parent as? android.view.ViewGroup)?.removeView(this); onDismiss() }.start()
     }
 }

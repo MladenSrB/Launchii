@@ -311,7 +311,7 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
 
     /** Fades the copy over / off the real wallpaper so hand-overs dissolve instead of cutting. */
     var copyAlpha = 1f
-        set(v) { field = v; sharpView.alpha = v }
+        set(v) { field = v; sharpView.alpha = if (transitionBlurRadius > 0f) 1f else v }
 
     /** Keeps the (un-zoomed) copy on screen while it fades out after a zoom. */
     var holdCopy = false
@@ -319,6 +319,15 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
 
     /** Home's layer: its zoom also drives Launchii's live wallpaper, when that's the wallpaper. */
     var drivesLive = false
+
+    private var transitionBlurRadius = 0f
+
+    /** The parent blurs our copy; the wallpaper service renders its own matching blur. */
+    fun setTransitionBlur(radius: Float) {
+        transitionBlurRadius = radius
+        if (drivesLive) LiveWallpaper.setTransitionBlur(radius)
+        updateViews()
+    }
 
     /** Wallpaper zoom (1 = none, 1.3 = HighEndOpenParams). */
     fun setZoom(z: Float) {
@@ -337,7 +346,9 @@ class WallpaperLayer(context: Context) : android.view.ViewGroup(context) {
         val zoomed = zoom != 1f
         // Launchii's live wallpaper zooms itself: the copy would only cross-dissolve with it
         val live = drivesLive && LiveWallpaper.drives
-        sharpView.visibility = if ((zoomed || holdCopy) && blurProgress < 1f && !live) VISIBLE else INVISIBLE
+        val transition = transitionBlurRadius > 0f
+        sharpView.visibility = if ((zoomed || holdCopy || transition) && blurProgress < 1f && !live) VISIBLE else INVISIBLE
+        sharpView.alpha = if (transition) 1f else copyAlpha
         val z = zoom * systemScale
         sharpView.scaleX = z; sharpView.scaleY = z
         if (blurProgress > 0f) {

@@ -43,6 +43,13 @@ object Easing {
     val APP_CLOSE_POSITION: Interpolator = PathInterpolator(0.33f, 0f, 0.1f, 1f)
     val APP_CLOSE_WINDOW_ALPHA: Interpolator = PathInterpolator(0.83f, -0.32f, 0.02f, 1.36f)
 
+    // iOS-inspired app motion: prompt response, then a longer, soft settling tail.
+    // These are launcher tuning values, not measured UIKit timing curves.
+    val APP_LAUNCH: Interpolator = PathInterpolator(0.2f, 0.8f, 0.2f, 1f)
+    val APP_RETURN: Interpolator = PathInterpolator(0.22f, 0.78f, 0.2f, 1f)
+    val APP_BLUR_IN: Interpolator = PathInterpolator(0.2f, 0.7f, 0.2f, 1f)
+    val APP_BLUR_OUT: Interpolator = PathInterpolator(0.35f, 0f, 0.25f, 1f)
+
     /** Blur forward / reverse used by app transitions. */
     val BLUR_FORWARD: Interpolator = PathInterpolator(0f, 0.6f, 0.4f, 1f)
     val BLUR_REVERSE: Interpolator = PathInterpolator(0.75f, 0f, 1f, 0.8f)

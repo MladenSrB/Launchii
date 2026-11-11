@@ -1,5 +1,7 @@
 package com.oneuiclone.home
 
+import androidx.core.view.doOnLayout
+
 import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.LauncherApps
@@ -18,11 +20,13 @@ import com.oneuiclone.home.debug.AnimLog
 import com.oneuiclone.home.device.DeviceProfile
 import com.oneuiclone.home.icons.IconFactory
 import com.oneuiclone.home.model.AppInfo
+import com.oneuiclone.home.model.AppKey
 import com.oneuiclone.home.model.AppRepository
 import com.oneuiclone.home.model.Container
 import com.oneuiclone.home.model.HomeItem
 import com.oneuiclone.home.model.WorkspaceModel
 import com.oneuiclone.home.motion.Easing
+import com.oneuiclone.home.ui.AppContentMotion
 import com.oneuiclone.home.ui.BackgroundController
 import com.oneuiclone.home.ui.CellLayout
 import com.oneuiclone.home.ui.FolderIconView
@@ -54,21 +58,23 @@ private const val CLOSE_ZOOMS_WALLPAPER = false
  */
 private const val RECENTS_CLOSE_ZOOM = true
 /** Home shrink + wallpaper zoom when an app is opened. */
-private const val OPEN_ZOOM_MS = 280L
-private const val OPEN_SCALE = 0.85f
-/** How far Home shrinks while a launch is held for a close to finish (half the open zoom). */
-private const val OPEN_HOLD_SCALE = 0.925f
-/** Longest a system close into Home is assumed to run, and longest a launch tapped during one waits for it. */
+private const val OPEN_ZOOM_MS = 360L
+private const val OPEN_SCALE = 0.80f
+private const val OPEN_HOLD_SCALE = 0.90f
 private const val CLOSE_MAX_MS = 1200L
+private const val RETURN_INTENT_GRACE_MS = 180L
 private const val LAUNCH_WAIT_MS = 400L
+/** The whole workspace returns from slightly enlarged to its resting size. */
+private const val RETURN_SCALE = 1.14f
+private const val RETURN_MS = 520L
 /** Longest the close zoom waits for Home to be put back on screen, on phones that never send a gesture contract. */
 private const val RETURN_WAIT_MS = 2000L
 private const val KEY_CONTRACT_SEEN = "contract_seen"
-/** Zoom In open: the card's spring (≈ 95 % open by 240 ms, ~1 % overshoot) and Home zooming toward the icon. */
-private const val ZOOM_IN_STIFFNESS = 300f
-private const val ZOOM_IN_DAMPING = 0.84f
-private const val ZOOM_IN_MS = 650L
-private const val ZOOM_IN_SCALE = 1.15f
+/** Zoom In shares a lightly overshooting spring across the card, desktop and wallpaper. */
+private const val ZOOM_IN_STIFFNESS = 320f
+private const val ZOOM_IN_DAMPING = 0.90f
+private const val ZOOM_IN_MS = 680L
+private const val ZOOM_IN_SCALE = 1.22f
 /**
  * The card aims past the screen's edges, so they're covered most of the way through the spring instead of only
  * at its slow tail (recording 6024: a thin strip of Home showed at the edges for ~100 ms). 0.9 (0.45/0.46) was
@@ -97,7 +103,7 @@ private const val CARD_TIMEOUT_MS = 8000L
  * Home back before the app covered it (a swipe home or Back mid-open, or an app that closed at once): the card
  * shrinks back into its icon on the close's curve and length, in step with Home zooming back (playReturnAnimation).
  */
-private const val CARD_RETRACT_MS = 450L
+private const val CARD_RETRACT_MS = RETURN_MS
 
 class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
@@ -132,6 +138,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private val searchSources = com.oneuiclone.home.ui.SearchSources(activity, usage) { repo?.apps ?: emptyList() }
 
     val root = RootLayout()
+    private val launchScene = FrameLayout(activity)
     val scrim = ScrimView(activity)
     val wallpaper = com.oneuiclone.home.ui.WallpaperLayer(activity).apply { drivesLive = true }
     /** Blurred wallpaper behind widgets set to Style › Blur. */
@@ -140,6 +147,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     val homeLayer = FrameLayout(activity)
     val appsLayer = FrameLayout(activity)
     val overlay = FrameLayout(activity)
+    private val homeAppLayer = FrameLayout(activity).apply { clipChildren = false }
+    private val drawerAppLayer = FrameLayout(activity).apply { clipChildren = false }
+    private val homeAppMotion = AppContentMotion(homeAppLayer)
+    private val drawerAppMotion = AppContentMotion(drawerAppLayer)
+    private val folderAppMotion = AppContentMotion(overlay)
+    private val folderAppBlur = com.oneuiclone.home.ui.AppTransitionBlur({}, overlay)
+    private val unlockAnimation = com.oneuiclone.home.ui.UnlockAnimation()
+    private val transitionBlur = com.oneuiclone.home.ui.AppTransitionBlur({ radius ->
+        wallpaper.setTransitionBlur(radius)
+        background.setTransitionBlur(radius)
+    }, launchScene)
 
     lateinit var workspace: PagedView; private set
     lateinit var indicator: PageIndicator; private set
@@ -163,6 +181,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         { v, app -> launch(v, app) },
         { folder, title -> folder.title = title; model?.save(); bindWorkspace() },
         { v, item, app ->
+            v.item = item
             attachItem(v, item, app, false) { folderSiblings(v) }
             applyBadge(v, listOf(app.key.component.packageName to app.user))   // folder contents are built on open
         },
@@ -179,14 +198,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             }
         },
         onOpenness = { h ->
-            // all of Home shrinks behind a pop-up, dock and page dots too (unless an app opening or closing has it:
-            // one tapped while a folder closes)
             val v = if (state.state == StateController.State.APPS) appsLayer else homeLayer
-            if (contentAnim?.isRunning != true) {
-                centrePivot(v)
-                val s = 1f - (1f - com.oneuiclone.home.ui.FolderController.POPUP_HOME_SCALE) * h
-                v.scaleX = s; v.scaleY = s
-            }
+            centrePivot(v)
+            val s = 1f - (1f - com.oneuiclone.home.ui.FolderController.POPUP_HOME_SCALE) * h
+            v.scaleX = s; v.scaleY = s
         },
     )
 
@@ -288,14 +303,15 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     private var dragArmed: View? = null
     private var armX = 0f
     private var armY = 0f
-    private var lastLaunchedApp: AppInfo? = null
+    private class LaunchOrigin(val key: AppKey, val user: android.os.UserHandle, val itemId: Long?, val layer: ViewGroup)
+    private var launchOrigin: LaunchOrigin? = null
     /** The widget the last app was opened from, and the packages its window may report (Launcher3's launch cookie). */
     private class WidgetLaunch(val appWidgetId: Int, val packages: Set<String>)
     private var lastWidgetLaunch: WidgetLaunch? = null
     private var insets = Rect()
     private var bound = false
     private var pendingReturnAnim = false
-    private var contentAnim: ValueAnimator? = null
+    private var launchingContent: ViewGroup? = null
     /**
      * Process-wide, so removed in [destroy]: a new wallpaper changes the dynamic colours, which recreates the
      * activity, and a stale listener would reload this instance's shut-down wallpaper copy.
@@ -320,21 +336,25 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             AnimLog.log("window visibility=$it")
             if (it != View.VISIBLE) homeHidden()
         }
-        root.addView(wallpaper, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(scrim, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(homeLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(appsLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(launchScene, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        launchScene.clipChildren = false
+        launchScene.addView(wallpaper, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        launchScene.addView(scrim, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        homeAppLayer.addView(homeLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        drawerAppLayer.addView(appsLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        launchScene.addView(homeAppLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        launchScene.addView(drawerAppLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         appsLayer.visibility = View.INVISIBLE
         appsLayer.alpha = 0f
         homeLayer.clipChildren = false
         appsLayer.clipChildren = false
         root.setOnApplyWindowInsetsListener { _, wi ->
-            val sb = wi.getInsets(android.view.WindowInsets.Type.systemBars())
+            val sb = wi.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
             val r = Rect(sb.left, sb.top, sb.right, sb.bottom)
             if (r != insets) {
                 insets = r
-                if (root.width > 0) setupProfile(root.width, root.height)
+                requestProfileUpdate()
             }
             wi
         }
@@ -356,8 +376,50 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     // profile + binding
     // ---------------------------------------------------------------------------------------------
 
+    private var profileGeneration = 0
+    private var pendingHomePage: Int? = null
+    private var pendingAppIndex: Int? = null
+    private var pendingSearch: Pair<String, Boolean>? = null
+    private val profileUpdate = Runnable {
+        if (root.width > 0 && root.height > 0) setupProfile(root.width, root.height)
+    }
+
+    /** Coalesce display/inset changes and read the latest bounds rather than stale posted sizes. */
+    fun requestProfileUpdate() {
+        root.removeCallbacks(profileUpdate)
+        root.post(profileUpdate)
+    }
+
     private fun setupProfile(w: Int, h: Int) {
-        prefsSnapshot = snapshot()
+        if (w <= 0 || h <= 0) return
+        cancelPredictiveBack(immediate = true)
+        unlockAnimation.finish()
+        val settings = snapshot()
+        val density = activity.resources.displayMetrics.density
+        if (::dp.isInitialized && dp.widthPx == w && dp.heightPx == h && dp.density == density &&
+            dp.insets == insets && prefsSnapshot == settings) return
+        val generation = ++profileGeneration
+        search?.takeIf { it.isOpen }?.let { pendingSearch = it.releaseForResize() to searchFromHome }
+        val restoreSearch = pendingSearch
+        search?.let { root.removeView(it) }; search = null
+        if (::workspace.isInitialized) {
+            pendingHomePage = pendingHomePage ?: workspace.currentPage
+            // Retain the first visible app, rather than raw pixels when column counts change.
+            val rowHeight = (appsGrid.height - appsGrid.paddingTop).coerceAtLeast(1) / appsGrid.rows.coerceAtLeast(1)
+            pendingAppIndex = pendingAppIndex ?: ((appsScroll.scrollY - appsGrid.paddingTop).coerceAtLeast(0) /
+                rowHeight.coerceAtLeast(1)) * dp.appsCols
+            liftSpring?.cancel(); liftSpring = null
+            liftTracking = false; searchLift = false; liftClosing = false
+            tracking = false; consumed = false
+            vt?.recycle(); vt = null
+            drag.cancel()
+            folders.closeNow()
+            popup?.dismiss(); popup = null
+            resizeFrame?.dismiss(); resizeFrame = null
+            edit.reset()
+            state.setImmediate(if (restoreSearch?.second == true) StateController.State.HOME else state.state)
+        }
+        prefsSnapshot = settings
         val newDp = DeviceProfile(w, h, activity.resources.displayMetrics.density, insets,
             homeCols = prefs.homeCols, homeRows = prefs.homeRows, appsCols = prefs.appsCols, appsRows = prefs.appsRows,
             iconScale = prefs.iconScale / 100f)
@@ -392,6 +454,13 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             r.themeAllApps = prefs.themeAllApps
             r.plateAlpha = prefs.iconPlateAlpha
             if (iconChanged || themeChanged) r.invalidateIcons(dp.iconSizePx) else bindAll()
+        }
+        if (restoreSearch != null) root.doOnLayout {
+            if (generation == profileGeneration && search == null) {
+                pendingSearch = null
+                openSearch(fromHome = restoreSearch.second)
+                search?.restoreQuery(restoreSearch.first)
+            }
         }
     }
 
@@ -647,7 +716,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     fun bindWorkspace() {
         val m = model ?: return
         val r = repo ?: return
-        val keep = workspace.currentPage
+        val keep = pendingHomePage ?: workspace.currentPage
+        pendingHomePage = null
         workspace.removeAllViews()
         val pages = maxOf(m.pageCount, (m.items.filter { it.container == Container.WORKSPACE }.maxOfOrNull { it.screen } ?: 0) + 1)
         m.pageCount = pages
@@ -668,7 +738,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                     else if (quick != null) quickOpenView(quick)
                     else if (item.provider == quickPairProvider) quickPairView(item.appWidgetId)
                     else widgets.createView(activity, item.appWidgetId, dp, item.sx, item.sy)) ?: continue
-                val wc = com.oneuiclone.home.ui.WidgetContainer(activity, item, hv, dp.widgetPaddingPx)
+                val wc = com.oneuiclone.home.ui.WidgetContainer(activity, item, hv, dp.widgetPaddingPx,
+                    if (dp.isExpanded) dp.widgetContentSize(item.sx, item.sy) else null)
                 applyWidgetStyle(wc)
                 wc.onLongPress = { showWidgetOptions(it) }
                 wc.onDragStart = { c, x, y ->
@@ -679,6 +750,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 }
                 wc.onDragMove = { x, y -> drag.move(x, y) }
                 wc.onDragEnd = { drag.drop() }
+                wc.onDragCancel = { drag.cancel() }
                 (workspace.pageAt(item.screen) as? CellLayout)?.addCell(wc, item.x, item.y, item.sx, item.sy)
                 continue
             }
@@ -692,7 +764,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         indicator.count = pages
         edit.refreshPages()
-        workspace.post { workspace.setCurrentPageImmediately(keep.coerceAtMost(pages - 1)) }
+        workspace.setCurrentPageImmediately(keep.coerceAtMost(pages - 1))
         indicator.setPage(keep.coerceAtMost(pages - 1), false)
         folders.rebound { findView(it) as? com.oneuiclone.home.ui.FolderIconView }
         updateBadges()                                   // new views: an edit mustn't drop badges until the next resume
@@ -740,7 +812,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         val title = info?.loadLabel(activity.packageManager) ?: "Widget"
         val p = com.oneuiclone.home.ui.QuickOptionPopup(activity, dp, iconFactory, title, emptyList(), opts, { popup = null }, null,
-            { rect, done -> snapshotBehind(rect, done) })
+            { rect, done -> snapshotBehind(rect, done) }, onShortcut = {})
         p.passThroughOutside = true                     // the resize handles sit under the popup's scrim
         overlay.addView(p, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val loc = IntArray(2); wc.getLocationInWindow(loc)
@@ -1106,7 +1178,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 applyFolderStyle(this, item)
                 setOnClickListener {
                     val i = hitApp(lastTouchX, lastTouchY)
-                    if (i >= 0) launch(this, content[i]) else folders.open(this, item, content, model!!.appsInFolder(item.id).filter { r.get(it.key) != null })
+                    if (i >= 0) launch(this, content[i]) else openWorkspaceFolder(this, item, r)
                 }
                 attachItem(this, item, null, false) { homeSiblings() }
             }
@@ -1118,13 +1190,18 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 previews = content.map { it.icon }
                 if (item.color != 0) bgColor = item.color
                 applyFolderStyle(this, item)
-                setOnClickListener {
-                    val its = model!!.appsInFolder(item.id).filter { r.get(it.key) != null }
-                    folders.open(this, item, its.mapNotNull { r.get(it.key) }, its)
-                }
+                setOnClickListener { openWorkspaceFolder(this, item, r) }
                 attachItem(this, item, null, false) { homeSiblings() }
             }
         }
+    }
+
+    private fun openWorkspaceFolder(icon: FolderIconView, folder: HomeItem.Folder, repository: AppRepository) {
+        val entries = model?.appsInFolder(folder.id).orEmpty().mapNotNull { item ->
+            repository.get(item.key)?.let { item to it }
+        }
+        folders.open(icon, folder, entries.map { it.second }, entries.map { it.first })
+        finishContractIfSettled()
     }
 
     private fun homeSiblings(): List<View> {
@@ -1228,7 +1305,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val p = com.oneuiclone.home.ui.QuickOptionPopup(activity, dp, iconFactory, title,
             app?.let { shortcutLoader.get(it) } ?: emptyList(), opts, { popup = null },
             app?.let { a -> { launcherApps.startAppDetailsActivity(a.key.component, a.user, null, null) } },
-            { rect, done -> snapshotBehind(rect, done) })
+            { rect, done -> snapshotBehind(rect, done) },
+            onShortcut = { shortcut ->
+                if (!shortcut.isEnabled) {
+                    shortcutLoader.clear()
+                    Toast.makeText(activity, shortcut.disabledMessage ?: "This shortcut is unavailable", Toast.LENGTH_SHORT).show()
+                } else {
+                    open(shortcut.shortLabel?.toString() ?: "shortcut", app, "Can't open this shortcut", v) { options ->
+                        launcherApps.startShortcut(shortcut, null, options)
+                    }
+                }
+            })
         overlay.addView(p, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val r = Rect(); v.iconBoundsOnScreen(r)
         p.showFor(r, v.parent === hotseat)
@@ -1373,6 +1460,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 attachItem(this, null, app, true) { appsSiblings() }
             }, i % dp.appsCols, i / dp.appsCols)
         }
+        pendingAppIndex?.let { index ->
+            val grid = appsGrid
+            val scroll = appsScroll
+            grid.doOnLayout {
+                if (grid === appsGrid) {
+                    pendingAppIndex = null
+                    val rowHeight = (grid.height - grid.paddingTop) / grid.rows.coerceAtLeast(1)
+                    scroll.scrollTo(0, if (index == 0) 0 else grid.paddingTop + (index / dp.appsCols) * rowHeight)
+                }
+            }
+        }
         updateBadges()
     }
 
@@ -1380,7 +1478,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     // launching (HighEndOpenParams: home scale 0.85 / 800 ms / (0.4,0,0,1), shortened to 280 ms cubic-out; close content 350 ms)
     // ---------------------------------------------------------------------------------------------
 
-    /** An open folder stays up and zooms with the open ([openContent]); onStop closes it once Home is off screen. */
+    /** The open folder stays in place under the app and receives it again on return. */
     fun launch(v: IconView, app: AppInfo) {
         if (AppBubbles.inSingleTaskBubble(activity, app)) {
             AnimLog.log("tap ${app.label}: single-task app in a bubble, opening the bubble")
@@ -1392,10 +1490,18 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     private fun start(v: IconView, app: AppInfo) {
-        val bounds = Rect()
-        v.iconBoundsOnScreen(bounds)
         usage.launched(app.key)
-        open(app.label.toString(), app, "Can't open ${app.label}", v) { launcherApps.startMainActivity(app.key.component, app.user, bounds, null) }
+        open(app.label.toString(), app, "Can't open ${app.label}", v) { options ->
+            if (app.user == Process.myUserHandle()) {
+                val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setComponent(app.key.component)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                activity.startActivity(intent, options)
+            } else {
+                // Keep profile-aware launching; the public API exposes options but not intent flags.
+                launcherApps.startMainActivity(app.key.component, app.user, null, options)
+            }
+        }
     }
 
     /** Quick options › Bubble; the first time, setup instead (notification permission, then bubble settings). */
@@ -1417,14 +1523,14 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         val loc = IntArray(2)
         v.getLocationInWindow(loc)
         val bounds = Rect(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
-        open("shortcut/contact", null, "Can't open that") { start(bounds, null) }
+        open("shortcut/contact", null, "Can't open that") { options -> start(bounds, options) }
     }
 
     /**
      * A widget click that opens an app gets the same open as an icon (and its close lands back on the widget).
      * Clicks that only send a broadcast or start a service (play/pause, toggles) are left alone.
      */
-    private fun launchFromWidget(appWidgetId: Int, sender: android.content.IntentSender, send: () -> Unit): Boolean {
+    private fun launchFromWidget(appWidgetId: Int, sender: android.content.IntentSender, send: (android.os.Bundle?) -> Unit): Boolean {
         val activityLaunch = opensActivity(sender)
         AnimLog.log("widget click from ${sender.creatorPackage}: " + if (activityLaunch) "opens an app" else "not an app launch, left alone")
         if (!activityLaunch) return false
@@ -1438,7 +1544,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             apps.firstOrNull { it.key.component.packageName == sender.creatorPackage && it.user == sender.creatorUserHandle }
                 ?: apps.firstOrNull { it.key.component.packageName == provider }
         }
-        open("widget ${sender.creatorPackage}", null, "Can't open that", widget = widget, widgetApp = owner) { send() }
+        open("widget ${sender.creatorPackage}", null, "Can't open that", widget = widget, widgetApp = owner) { options -> send(options) }
         lastWidgetLaunch = launch
         return true
     }
@@ -1485,7 +1591,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * covered Home and there's no system close coming back into it: a tap on the way back needn't wait for one.
      */
     private var hiddenSinceOpen = true
+    private var returnIntentGuardUntil = 0L
+    private var returnContractHandled = false
+    private var skipReturnOnResume = false
     private var pendingLaunch: (() -> Unit)? = null
+    private var maskLaunchGeneration = 0
+    private var maskLaunchPending = false
+
+    private fun cancelMaskLaunch() {
+        maskLaunchGeneration++
+        maskLaunchPending = false
+    }
     private val launchFallback = Runnable { closeFinished("wait cap") }
 
     private fun markClosing(why: String) {
@@ -1503,6 +1619,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         closingUntil = 0L
         root.removeCallbacks(launchFallback)
         if (source != "wait cap") homeShown("enter complete")
+        shortenReturnIntentGuard()
         val start = pendingLaunch ?: return
         pendingLaunch = null
         start()
@@ -1515,7 +1632,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * shrinks part of the way, and the rest of the zoom plays from the start, in step with the app fading in.
      */
     private fun open(label: String, app: AppInfo?, failure: String, icon: IconView? = null,
-                     widget: View? = null, widgetApp: AppInfo? = null, start: () -> Unit) {
+                     widget: View? = null, widgetApp: AppInfo? = null, start: (android.os.Bundle?) -> Unit) {
+        cancelPredictiveBack(immediate = true)
+        unlockAnimation.finish()
+        cancelMaskLaunch()
         val tapAt = android.os.SystemClock.uptimeMillis()
         val closingFor = closingUntil - tapAt
         val hold = closingFor > 0
@@ -1532,33 +1652,77 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // Aura, Shutter, Orbit… are drawn by Launchii's live wallpaper; with another wallpaper they're Zoom In
         val effect = if (look != null && !look.translucent && com.oneuiclone.home.ui.LiveWallpaper.drives) prefs.openEffect else null
         val zoomIn = look != null && !look.translucent && effect == null
+        val maskColor = com.oneuiclone.home.icons.IconColor.edgeExtension(
+            icon?.displayedIcon() ?: widgetApp?.drawerIcon ?: app?.icon, look?.color ?: android.graphics.Color.BLACK).average
         AnimLog.log("tap $label " + (if (hold) "during close (window ${closingFor}ms left) -> hold" else "-> start now") +
             if (effect != null) " ($effect)" else if (zoomIn) " (zoom in)" else "")
-        launched(app) {
+        val layer = openContent()
+        val origin = if (icon != null && app != null && icon.isAttachedToWindow &&
+            generateSequence(icon.parent) { it.parent }.any { it === layer }) {
+            LaunchOrigin(app.key, app.user, icon.item?.id, layer)
+        } else null
+        launched(origin, layer) {
+            retractLaunchCard("superseded")
+            endEffect(animate = true)
+            transitionBlur.animateTo(1f, OPEN_ZOOM_MS)
+            if (layer === overlay) folderAppBlur.animateTo(1f, OPEN_ZOOM_MS)
             // a held Zoom In or wallpaper-drawn launch just waits with its card or effect up, like a slow app
-            if (effect != null && icon != null) effectOpen(icon, app!!, effect, look!!.color)
-            else if (effect != null) effectOpenFromWidget(widget!!, widgetApp!!, effect, look!!.color)
-            else if (zoomIn && icon != null) zoomIn(icon, app!!, look!!.color)
-            else if (zoomIn) zoomInFromWidget(widget!!, widgetApp!!, look!!.color)
+            if (effect != null && icon != null) effectOpen(icon, app!!, effect, maskColor)
+            else if (effect != null) effectOpenFromWidget(widget!!, widgetApp!!, effect, maskColor)
+            else if (zoomIn && icon != null) zoomIn(icon, app!!, maskColor)
+            else if (zoomIn) zoomInFromWidget(widget!!, widgetApp!!, maskColor)
             else zoomOpen(if (hold) OPEN_HOLD_SCALE else OPEN_SCALE, if (hold) LAUNCH_WAIT_MS else OPEN_ZOOM_MS)
         }
         logFrames()
-        val go = {
+        val openingCard = launchCard?.takeIf { zoomIn && !it.retracting }
+        val appOptions = android.app.ActivityOptions.makeCustomAnimation(activity, 0, 0).toBundle()
+        val launchApp: () -> Boolean = {
             try {
                 AnimLog.log("start $label after ${android.os.SystemClock.uptimeMillis() - tapAt}ms")
-                if (hold && !zoomIn && effect == null) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS)
-                start()
+                if (hold && !zoomIn && effect == null) zoomOpen(OPEN_SCALE, OPEN_ZOOM_MS, layer)
+                start(appOptions)
                 if (launchCard != null) { root.removeCallbacks(cardTimeout); root.postDelayed(cardTimeout, CARD_TIMEOUT_MS) }
                 if (effectContent != null) { root.removeCallbacks(effectTimeout); root.postDelayed(effectTimeout, CARD_TIMEOUT_MS) }
+                true
             } catch (e: Exception) {
                 AnimLog.log("start $label failed: $e")
                 Toast.makeText(activity, failure, Toast.LENGTH_SHORT).show()
                 cancelOpen()
+                false
             }
         }
+        val request = maskLaunchGeneration
+        var maskReady = openingCard == null
+        var closeReady = !hold
+        var queued = false
+        maskLaunchPending = openingCard != null
+
+        fun launchWhenReady() {
+            if (request != maskLaunchGeneration || !maskReady || !closeReady || queued) return
+            queued = true
+            if (openingCard == null) {
+                launchApp()
+                return
+            }
+            // Dispatch only after the entire expansion finishes and its final frame has been drawn.
+            if (launchCard === openingCard && !openingCard.retracting && openingCard.isAttachedToWindow &&
+                awake() && !activity.isFinishing && !activity.isDestroyed) {
+                maskLaunchPending = false
+                AnimLog.log("mask expansion complete and drawn: dispatch $label with native animation")
+                if (launchApp()) openingCard.beginExit()
+            } else cancelMaskLaunch()
+        }
+
+        openingCard?.onExpanded = {
+            if (request == maskLaunchGeneration && launchCard === openingCard) {
+                maskReady = true
+                launchWhenReady()
+            }
+        }
+        val go = { closeReady = true; launchWhenReady() }
+        root.removeCallbacks(launchFallback)
         if (hold) {
             pendingLaunch = go
-            root.removeCallbacks(launchFallback)
             root.postDelayed(launchFallback, LAUNCH_WAIT_MS)
         } else {
             pendingLaunch = null
@@ -1586,7 +1750,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     /** What the open zoom scales: an open folder (Home is faded out behind it), otherwise the current layer. */
-    private fun openContent(): View = when {
+    private fun openContent(): ViewGroup = when {
         folders.isOpen -> overlay
         state.state == StateController.State.APPS -> appsLayer
         else -> homeLayer
@@ -1594,8 +1758,16 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     private var launchCard: com.oneuiclone.home.ui.LaunchCard? = null
     /** The tapped icon, hidden while the card stands in for it. */
-    private var cardIcon: IconView? = null
+    private var cardTarget: CloseTarget? = null
     private var cardAnim: ValueAnimator? = null
+    private val retractingCards = mutableListOf<CardRetraction>()
+
+    private inner class CardRetraction(
+        val card: com.oneuiclone.home.ui.LaunchCard,
+        val target: CloseTarget?,
+    ) {
+        lateinit var animation: ValueAnimator
+    }
     private val splashLook = com.oneuiclone.home.icons.SplashLook(activity)
     private val cardTimeout = Runnable {
         AnimLog.log("zoom in: Home still not covered ${CARD_TIMEOUT_MS}ms after the start, card faded")
@@ -1636,7 +1808,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     private fun zoomIn(v: IconView, app: AppInfo, splashColor: Int) {
         val icon = Rect()
-        v.iconBoundsOnScreen(icon)
+        val target = iconTarget(v, app.key) ?: return
+        v.iconBoundsOnScreen(icon, target.part())
         // a see-through (glass) icon: the card comes in half see-through too, so it grows out of the glass
         val glass = v.plateGlass != null && v.icon === app.icon && app.icon !== app.drawerIcon
         // a Minimal icon has no plate: the card starts invisible behind the glyph and fills in as it grows
@@ -1653,7 +1826,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             glass -> com.oneuiclone.home.ui.LaunchCard.GLASS_FROM_ALPHA
             else -> 1f
         }
-        zoomIn(icon, v.displayedIcon(), app, splashColor, v, fromAlpha,
+        val bitmap = if (v is LargeFolderIconView) app.icon else v.displayedIcon()
+        zoomIn(icon, bitmap, app, splashColor, target, fromAlpha,
             when {
                 dark -> com.oneuiclone.home.icons.IconFactory.DARK_PLATE
                 look -> com.oneuiclone.home.icons.IconFactory.lookCard(prefs.iconLook, com.oneuiclone.home.icons.IconFactory.lookNight(prefs.iconMode, iconFactory.isNight()))
@@ -1664,38 +1838,35 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     /** Zoom In from a widget: the card grows out of the widget's shape and fades in over it, with no app icon on it. */
     private fun zoomInFromWidget(widget: View, app: AppInfo, splashColor: Int) {
         val loc = IntArray(2)
-        widget.getLocationOnScreen(loc)
-        val from = Rect(loc[0], loc[1], loc[0] + (widget.width * homeLayer.scaleX).toInt(), loc[1] + (widget.height * homeLayer.scaleY).toInt())
+        widget.getLocationInWindow(loc)
+        val scale = homeLayer.scaleX * homeAppLayer.scaleX
+        val from = Rect(loc[0], loc[1], loc[0] + (widget.width * scale).toInt(), loc[1] + (widget.height * scale).toInt())
         zoomIn(from, null, app, splashColor, null)
     }
 
     /**
-     * The Zoom In card from [from] (screen coordinates). [v]: the tapped icon, hidden while the card stands in for
-     * it; null for a widget, which the card fades in over instead.
+     * The Zoom In card from [from] (window coordinates). The tapped icon is hidden while the card stands in for it.
      */
-    private fun zoomIn(from: Rect, iconBitmap: android.graphics.Bitmap?, app: AppInfo, splashColor: Int, v: IconView?,
+    private fun zoomIn(from: Rect, iconBitmap: android.graphics.Bitmap?, app: AppInfo, splashColor: Int, target: CloseTarget?,
                        fromAlpha: Float = 1f, fromColor: Int? = null) {
         // tapped again while its card was still shrinking back: the new card carries on from there, no restart
-        val old = launchCard?.takeIf { it.retracting && v != null && cardIcon === v }
-        dropLaunchCard(fade = false)
-        val content = openContent()
+        val old = retractingCards.lastOrNull { target != null && it.target?.matches(target) == true }
+        val content = launchingContent ?: openContent()
         val icon = Rect(from)
         val rootLoc = IntArray(2)
         root.getLocationInWindow(rootLoc)
         icon.offset(-rootLoc[0], -rootLoc[1])
-        // Home zooms around the icon so it stays under the card; mid-close (already scaled) it keeps its pivot
-        val pivot = if (content.scaleX == 1f) {
-            val loc = IntArray(2)
-            content.getLocationInWindow(loc)
-            android.graphics.PointF(icon.exactCenterX() + rootLoc[0] - loc[0], icon.exactCenterY() + rootLoc[1] - loc[1])
-        } else null
+        val pivot = target?.takeIf { it.isIn(content) }?.rect(content)?.let {
+            android.graphics.PointF(it.exactCenterX(), it.exactCenterY())
+        }
         val card = com.oneuiclone.home.ui.LaunchCard(activity).apply {
             this.from.set(icon)
             color = splashColor
+            edgeColors = com.oneuiclone.home.icons.IconColor.edgeExtension(iconBitmap ?: app.drawerIcon, splashColor)
             this.fromAlpha = fromAlpha
             this.fromColor = fromColor
             this.icon = iconBitmap
-            if (v != null) {
+            if (target != null) {
                 startRadius = icon.width() * com.oneuiclone.home.icons.IconShape.corner(com.oneuiclone.home.ui.LaunchCard.ICON_RADIUS)
                 // the card starts as the icon's own shape
                 if (!com.oneuiclone.home.icons.IconShape.isSquircle) fromShape = com.oneuiclone.home.icons.IconShape.current
@@ -1708,32 +1879,51 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             endScale = ZOOM_IN_CARD_SCALE
             // the splash's 160 dp circle, centred on the screen when the spring settles
             splashIconPx = 160f * activity.resources.displayMetrics.density
-            if (old != null) { progress = old.progress; old.splashIcon?.let { splashIcon = it } }
+            if (old != null) {
+                progress = old.card.progress
+                alpha = old.card.alpha
+                old.card.splashIcon?.let { splashIcon = it }
+            }
+            if (target != null) anchor = target::updateCardBounds
         }
-        AnimLog.log("zoom in: card from ${if (v == null) "widget " else ""}${icon.toShortString()}" + (if (fromAlpha < 1f) ", glass or minimal icon: from $fromAlpha opacity" else "") +
-            if (old != null) ", picked up while shrinking back at %.2f".format(old.progress) else "")
+        AnimLog.log("zoom in: card from ${if (target == null) "widget " else ""}${icon.toShortString()}" + (if (fromAlpha < 1f) ", glass or minimal icon: from $fromAlpha opacity" else "") +
+            if (old != null) ", picked up while shrinking back at %.2f".format(old.card.progress) else "")
         root.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         launchCard = card
-        v?.iconVisible = false
-        cardIcon = v
+        target?.setHidden(true)
+        cardTarget = target
+        old?.let { finishCardRetraction(it) }
         val loadAt = android.os.SystemClock.uptimeMillis()
-        if (v != null) splashLook.loadIcon(app.activityInfo) { d ->
+        if (target != null) splashLook.loadIcon(app.activityInfo) { d ->
             AnimLog.log("zoom in: full icon after ${android.os.SystemClock.uptimeMillis() - loadAt}ms" + if (launchCard === card) "" else " (card gone)")
             if (launchCard === card) card.splashIcon = d
         }
 
         val spring = Easing.spring(ZOOM_IN_STIFFNESS, ZOOM_IN_DAMPING, ZOOM_IN_MS)
-        animateContentScale(content, ZOOM_IN_SCALE, ZOOM_IN_MS, spring, pivot)
+        appMotion(content).open(ZOOM_IN_SCALE, ZOOM_IN_MS, spring, pivot)
         animateWallpaperZoom(wallpaperOpenZoom, ZOOM_IN_MS, spring)
         var barsSet = false
-        cardAnim = ValueAnimator.ofFloat(card.progress, 1f).apply {
+        val initialProgress = card.progress
+        val initialAlpha = card.alpha
+        cardAnim = ValueAnimator.ofFloat(initialProgress, 1f).apply {
             duration = ZOOM_IN_MS
             interpolator = spring
             addUpdateListener {
                 card.progress = it.animatedValue as Float
+                card.alpha = initialAlpha + (1f - initialAlpha) * it.animatedFraction.coerceIn(0f, 1f)
                 // once the card fills most of the screen the status and navigation bars go dark on a light card
                 if (!barsSet && card.progress > 0.6f) { barsSet = true; setLightBars(card.isLight) }
             }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!cancelled && launchCard === card && !card.retracting) {
+                        card.expansionFinished = true
+                        card.invalidate()
+                    }
+                }
+            })
             start()
         }
     }
@@ -1747,49 +1937,71 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /** Removes the Zoom In card (at once when Home is out of sight, faded otherwise) and gives the icon back. */
     private fun dropLaunchCard(fade: Boolean) {
+        cancelMaskLaunch()
         root.removeCallbacks(cardTimeout)
         val card = launchCard ?: return
+        card.onExpanded = null
+        card.cancelExit(restore = false)
         launchCard = null
         cardAnim?.cancel()
         cardAnim = null
-        cardIcon?.takeIf { contractTarget?.view !== it }?.iconVisible = true
-        cardIcon = null
+        val target = cardTarget
+        cardTarget = null
+        revealTargetIfUnused(target)
         if (fade) card.animate().alpha(0f).setDuration(150).withEndAction { root.removeView(card) }.start()
         else root.removeView(card)
         applyTextMode()
     }
 
-    /**
-     * The open was interrupted before the app covered Home: the card shrinks back into its icon from wherever it
-     * is (One UI / iOS), rather than standing full screen until it fades. False when there's no card.
-     */
-    private fun retractLaunchCard(why: String): Boolean {
-        val card = launchCard ?: return false
-        if (card.retracting) return true
+    /** The replaced card keeps animating back while another card or folder opens. */
+    private fun retractLaunchCard(why: String) {
+        val card = launchCard ?: return
+        cancelMaskLaunch()
         root.removeCallbacks(cardTimeout)
+        val retraction = CardRetraction(card, cardTarget)
+        retractingCards += retraction
+        launchCard = null
+        cardTarget = null
         card.retracting = true
+        card.cancelExit(restore = false)
+        card.onExpanded = null
         cardAnim?.cancel()
+        cardAnim = null
         AnimLog.log("zoom in: open interrupted ($why) at card %.2f, back into the icon".format(card.progress))
-        var barsReset = false
-        cardAnim = ValueAnimator.ofFloat(card.progress, 0f).apply {
+        val startAlpha = card.alpha
+        retraction.animation = ValueAnimator.ofFloat(card.progress, 0f).apply {
             duration = CARD_RETRACT_MS
-            interpolator = Easing.APP_CLOSE_POSITION
+            interpolator = Easing.APP_RETURN
             addUpdateListener {
                 card.progress = it.animatedValue as Float
-                if (!barsReset && card.progress < 0.6f) { barsReset = true; applyTextMode() }
+                card.alpha = startAlpha * (it.animatedFraction.let { fraction -> 1f - fraction * fraction })
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) { if (launchCard === card) dropLaunchCard(fade = false) }
+                override fun onAnimationEnd(animation: android.animation.Animator) { finishCardRetraction(retraction) }
             })
-            start()
         }
-        return true
+        retraction.animation.start()
+        applyTextMode()
+    }
+
+    private fun finishCardRetraction(retraction: CardRetraction) {
+        if (!retractingCards.remove(retraction)) return
+        retraction.animation.cancel()
+        root.removeView(retraction.card)
+        revealTargetIfUnused(retraction.target)
+    }
+
+    private fun revealTargetIfUnused(target: CloseTarget?) {
+        if (target == null || cardTarget?.matches(target) == true ||
+            contractTarget?.matches(target) == true || effectTarget?.matches(target) == true ||
+            retractingCards.any { it.target?.matches(target) == true }) return
+        target.setHidden(false)
     }
 
     /** The layer a wallpaper-drawn open faded out (given back its opacity once the app covers it), or null. */
     private var effectContent: View? = null
     /** Shutter's tapped icon, hidden while the wallpaper's copy of it slides to the middle. */
-    private var effectIcon: IconView? = null
+    private var effectTarget: CloseTarget? = null
     /** Whether the status and navigation bars go dark-on-light over the effect (Shutter on a light splash). */
     private var effectBarsLight = false
     private val effectTimeout = Runnable {
@@ -1813,16 +2025,18 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     private fun effectOpen(v: IconView, app: AppInfo, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int) {
         val r = Rect()
-        v.iconBoundsOnScreen(r)
-        effectOpen(r, v.icon ?: app.drawerIcon, kind, splash, app, v)
+        val target = iconTarget(v, app.key) ?: return
+        v.iconBoundsOnScreen(r, target.part())
+        effectOpen(r, if (v is LargeFolderIconView) app.icon else v.icon ?: app.drawerIcon, kind, splash, app, target)
     }
 
     /** From a widget: the effect starts at the widget's middle, in the colours of the app that owns it. */
     private fun effectOpenFromWidget(widget: View, app: AppInfo, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int) {
         val loc = IntArray(2)
         widget.getLocationOnScreen(loc)
-        val cx = loc[0] + widget.width * homeLayer.scaleX / 2f
-        val cy = loc[1] + widget.height * homeLayer.scaleY / 2f
+        val scale = homeLayer.scaleX * homeAppLayer.scaleX
+        val cx = loc[0] + widget.width * scale / 2f
+        val cy = loc[1] + widget.height * scale / 2f
         val half = dp.iconSizePx / 2
         effectOpen(Rect((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt()), app.drawerIcon, kind, splash, app, null)
     }
@@ -1834,24 +2048,28 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * opacity (and Shutter's icon) back in onStop, out of sight.
      */
     private fun effectOpen(from: Rect, icon: android.graphics.Bitmap, kind: com.oneuiclone.home.ui.LiveWallpaper.Kind, splash: Int,
-                           app: AppInfo, v: IconView?) {
-        dropLaunchCard(fade = false)
-        val content = openContent()
+                           app: AppInfo, target: CloseTarget?) {
+        val content = launchingContent ?: openContent()
         val e = com.oneuiclone.home.ui.LiveWallpaper.OpenEffect(kind, icon, from.exactCenterX(), from.exactCenterY(),
             from.width().toFloat(), android.os.SystemClock.uptimeMillis(), splash)
         com.oneuiclone.home.ui.LiveWallpaper.startEffect(e)
         AnimLog.log("open effect $kind: from ${from.toShortString()}")
         val hm = effectHome(kind)
-        animateContentScale(content, hm.scale, hm.scaleMs, hm.curve)
+        appMotion(content).open(hm.scale, hm.scaleMs, hm.curve)
         if (kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.AURA) animateWallpaperZoom(wallpaperOpenZoom, AURA_MS, Easing.STANDARD)
-        content.animate().cancel()
-        content.animate().alpha(0f).setStartDelay(hm.fadeDelay).setDuration(hm.fadeMs)
+        val visualLayer = when (content) {
+            homeLayer -> homeAppLayer
+            appsLayer -> drawerAppLayer
+            else -> overlay
+        }
+        visualLayer.animate().cancel()
+        visualLayer.animate().alpha(0f).setStartDelay(hm.fadeDelay).setDuration(hm.fadeMs)
             .setInterpolator(android.view.animation.LinearInterpolator()).start()
-        effectContent = content
+        effectContent = visualLayer
         if (kind == com.oneuiclone.home.ui.LiveWallpaper.Kind.SHUTTER) {
             // the wallpaper's copy of the icon slides to the middle, then becomes the full icon in its splash circle
-            v?.iconVisible = false
-            effectIcon = v
+            target?.setHidden(true)
+            effectTarget = target
             val loadAt = android.os.SystemClock.uptimeMillis()
             splashLook.loadIcon(app.activityInfo) { d ->
                 AnimLog.log("open effect: full icon after ${android.os.SystemClock.uptimeMillis() - loadAt}ms")
@@ -1897,8 +2115,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         root.removeCallbacks(effectTimeout)
         com.oneuiclone.home.ui.LiveWallpaper.endEffect()
         root.removeCallbacks(effectBars)
-        effectIcon?.iconVisible = true
-        effectIcon = null
+        val target = effectTarget
+        effectTarget = null
+        revealTargetIfUnused(target)
         val content = effectContent ?: return
         effectContent = null
         applyTextMode()
@@ -1908,21 +2127,26 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     /** Home content to [scale], the wallpaper zooming by the same fraction of the open zoom. */
-    private fun zoomOpen(scale: Float, duration: Long) {
-        val content = openContent()
+    private fun zoomOpen(scale: Float, duration: Long, content: ViewGroup = launchingContent ?: openContent()) {
         val fraction = (1f - scale) / (1f - OPEN_SCALE)
-        animateContentScale(content, scale, duration, Easing.CUBIC_OUT)
-        animateWallpaperZoom(1f + (wallpaperOpenZoom - 1f) * fraction, duration, Easing.CUBIC_OUT)
+        appMotion(content).open(scale, duration, Easing.APP_LAUNCH)
+        animateWallpaperZoom(1f + (wallpaperOpenZoom - 1f) * fraction, duration, Easing.APP_LAUNCH)
     }
 
     /** The app didn't start: Home comes back from the open zoom. */
     private fun cancelOpen() {
+        cancelMaskLaunch()
+        pendingLaunch = null
+        root.removeCallbacks(launchFallback)
         pendingReturnAnim = false
-        lastLaunchedApp = null
-        if (!retractLaunchCard("didn't start")) dropLaunchCard(fade = true)
+        launchOrigin = null
+        transitionBlur.animateTo(0f, OPEN_ZOOM_MS)
+        folderAppBlur.animateTo(0f, OPEN_ZOOM_MS)
+        retractLaunchCard("didn't start")
         endEffect(animate = true)
-        animateContentScale(openContent(), 1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
-        animateWallpaperZoom(1f, OPEN_ZOOM_MS, Easing.CUBIC_OUT)
+        launchingContent?.let { appMotion(it).cancelOpening(OPEN_ZOOM_MS, Easing.APP_LAUNCH) }
+        launchingContent = null
+        animateWallpaperZoom(1f, OPEN_ZOOM_MS, Easing.APP_LAUNCH)
     }
 
     /**
@@ -1931,25 +2155,25 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * the tap and is kept short and front-loaded, so it has mostly played before the app covers it, however fast
      * the app starts.
      */
-    private fun launched(app: AppInfo?, zoom: () -> Unit) {
-        // Opened straight after a close: the landing icon's surface doesn't scale with Home, and the ripple is stale.
-        finishContract()
-        returnRipple?.let { root.removeCallbacks(it); returnRipple = null }
-        // a close still waiting for Home to show is overtaken by this open
-        returnWaiting = false
-        root.removeCallbacks(returnWaitCap)
+    private fun launched(origin: LaunchOrigin?, content: ViewGroup, zoom: () -> Unit) {
+        if (returnWaiting) homeShown("new app launch")
+        if (launchingContent !== content) {
+            launchingContent?.let { appMotion(it).cancelOpening(RETURN_MS, Easing.APP_RETURN) }
+        }
+        launchingContent = content
         zoom()
         hiddenSinceOpen = false
         lastWidgetLaunch = null
         pendingReturnAnim = true
-        lastLaunchedApp = app
+        launchOrigin = origin
+        returnContractHandled = false
     }
 
     private var zoomAnim: ValueAnimator? = null
     private var returnRipple: Runnable? = null
     private var wallpaperZoom = 1f
-    /** HighEndOpenParams.wallpaperScale is 1.3; toned down to 20 % of that zoom (+6 %). */
-    private val wallpaperOpenZoom = 1.06f
+    /** A stronger wallpaper zoom shared by app opens and live-wallpaper returns. */
+    private val wallpaperOpenZoom = 1.12f
 
     private fun animateWallpaperZoom(to: Float, duration: Long, interp: android.view.animation.Interpolator) {
         // Cancelling a return settles the copy at rest (zoom 1); an app opened mid-return carries on from where it was.
@@ -1965,31 +2189,16 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
     }
 
-    /**
-     * Scales [v] around [pivot], by default its centre. A view still scaled around another pivot (the Zoom In
-     * open's icon) keeps it, so it doesn't jump.
-     */
-    private fun animateContentScale(v: View, to: Float, duration: Long, interp: android.view.animation.Interpolator,
-                                    pivot: android.graphics.PointF? = null) {
-        contentAnim?.cancel()
-        if (pivot != null) { v.pivotX = pivot.x; v.pivotY = pivot.y }
-        else if (v.scaleX == 1f) centrePivot(v)
-        val from = v.scaleX
-        v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        contentAnim = ValueAnimator.ofFloat(from, to).apply {
-            this.duration = duration
-            interpolator = interp
-            addUpdateListener { val s = it.animatedValue as Float; v.scaleX = s; v.scaleY = s }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    v.setLayerType(View.LAYER_TYPE_NONE, null)
-                    // back at rest: the centre again for anything else that scales it (the Home ↔ Apps swipe)
-                    if (to == 1f) centrePivot(v)
-                }
-                override fun onAnimationCancel(animation: android.animation.Animator) = v.setLayerType(View.LAYER_TYPE_NONE, null)
-            })
-            start()
-        }
+    private fun appMotion(content: ViewGroup) = when (content) {
+        homeLayer -> homeAppMotion
+        appsLayer -> drawerAppMotion
+        else -> folderAppMotion
+    }
+
+    private fun resetAppMotion() {
+        launchingContent = null
+        for (motion in listOf(homeAppMotion, drawerAppMotion, folderAppMotion)) motion.park(1f, null)
+        folderAppBlur.setProgress(0f)
     }
 
     private fun centrePivot(v: View) {
@@ -1998,11 +2207,20 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     fun onPause() {
+        cancelPredictiveBack(immediate = true)
         leftHomeAt = System.currentTimeMillis()
         BadgeService.removeListener(badgeListener)
     }
 
     fun onStop() {
+        skipReturnOnResume = false
+        if (!pendingReturnAnim) {
+            returnContractHandled = false
+            returnIntentGuardUntil = 0L
+        }
+        cancelMaskLaunch()
+        unlockAnimation.finish()
+        finishContract()
         com.oneuiclone.home.widgets.SplitLaunch.homeStopped()   // a split's top app covers Home: the bottom one can go
         searchSources.refresh()                        // Home is off screen: suggestions can change unseen
         quickOpen?.close(animate = false)
@@ -2015,21 +2233,27 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         if (RECENTS_CLOSE_ZOOM && !pendingReturnAnim && !edit.isActive && search?.isOpen != true && awake() &&
             !activity.isChangingConfigurations) {   // recreated (new wallpaper colours): Home stays on screen
             pendingReturnAnim = true
-            lastLaunchedApp = null
+            launchOrigin = null
             lastWidgetLaunch = null
             AnimLog.log("stopped without a launch: return animation armed")
         }
         if (pendingReturnAnim) {
-            contentAnim?.cancel()
-            // A folder the app was opened from closes out of sight, so the way back lands on its icon.
-            folders.closeNow()
-            overlay.scaleX = 1f; overlay.scaleY = 1f; centrePivot(overlay)
-            // One UI returns to the Home screen after an app is left with the home gesture.
-            if (state.state == StateController.State.APPS) state.setImmediate(StateController.State.HOME)
-            homeLayer.pivotX = homeLayer.width / 2f
-            homeLayer.pivotY = homeLayer.height / 2f
-            homeLayer.scaleX = OPEN_SCALE; homeLayer.scaleY = OPEN_SCALE
-            appsLayer.scaleX = 1f; appsLayer.scaleY = 1f; centrePivot(appsLayer)
+            transitionBlur.setProgress(1f)
+            resetAppMotion()
+            if (launchOrigin?.layer === overlay && folders.isOpen) {
+                folders.settleOpen()
+            } else {
+                folders.closeNow()
+            }
+            if (state.state == StateController.State.APPS && launchOrigin?.layer !== appsLayer)
+                state.setImmediate(StateController.State.HOME)
+            val content = openContent()
+            val anchor = launchOrigin?.let { originTarget(it) }?.rect(content)
+            val pivot = anchor?.let { android.graphics.PointF(it.exactCenterX(), it.exactCenterY()) }
+            appMotion(content).park(RETURN_SCALE, pivot)
+            launchingContent = content
+            if (content === overlay) folderAppBlur.setProgress(1f)
+            returnScaleFinished = false
             // The way back is drawn by the system (recents / back) over the real wallpaper, so keep our copy at
             // rest while away; playReturnAnimation() brings the zoom back in step with the close.
             zoomAnim?.cancel()
@@ -2046,8 +2270,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         hiddenSinceOpen = true
         if (launchCard != null) AnimLog.log("zoom in: Home covered, card removed")
         dropLaunchCard(fade = false)
+        retractingCards.toList().forEach { finishCardRetraction(it) }
         // Home is out of sight: its layer is opaque again for the close (the wallpaper drops its effect once hidden)
-        effectIcon?.let { it.iconVisible = true; effectIcon = null }
+        val target = effectTarget
+        effectTarget = null
+        revealTargetIfUnused(target)
         effectContent?.let { root.removeCallbacks(effectTimeout); root.removeCallbacks(effectBars); it.animate().cancel(); it.alpha = 1f; effectContent = null; applyTextMode() }
     }
 
@@ -2085,12 +2312,61 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
     }
 
+    /** Reset the desktop only for a screen-lock/unlock reveal. */
+    private fun prepareDesktopReveal() {
+        unlockAnimation.finish()
+        resetAppMotion()
+        returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
+        ripple.reset()
+        zoomAnim?.cancel(); zoomAnim = null
+        transitionBlur.setProgress(0f)
+        returnWaiting = false
+        root.removeCallbacks(returnWaitCap)
+        pendingReturnAnim = false
+        launchOrigin = null
+        returnIntentGuardUntil = 0L
+        returnScaleFinished = true
+        finishContract(immediate = true)
+    }
+
+    /** Keyguard stays system-owned; this only reveals the desktop after it has gone. */
+    fun playUnlockAnimation() {
+        if (!prefs.unlockAnimation || !bound || state.state != StateController.State.HOME ||
+            folders.isOpen || edit.isActive || search != null || picker != null || quickOpen != null || pendingLaunch != null) return
+        prepareDesktopReveal()
+        ripple.reset()
+        homeLayer.scaleX = 1f; homeLayer.scaleY = 1f; centrePivot(homeLayer)
+        transitionBlur.setProgress(0f)
+        unlockAnimation.play(root, homeSiblings())
+    }
+
+    fun onScreenLocked() {
+        cancelPredictiveBack(immediate = true)
+        cancelMaskLaunch()
+        unlockAnimation.finish()
+        pendingLaunch = null
+        root.removeCallbacks(launchFallback)
+        prepareDesktopReveal()
+        ripple.reset()
+        dropLaunchCard(fade = false)
+        endEffect(animate = false)
+        transitionBlur.setProgress(0f)
+        for (v in listOf(homeLayer, appsLayer, overlay)) {
+            v.scaleX = 1f; v.scaleY = 1f; centrePivot(v)
+        }
+        settleWallpaper()
+    }
+
     fun onResume() {
         AppUpdate.onResumed(activity)
         AppUpdate.checkIfDue()
+        val canReturn = !skipReturnOnResume && !maskLaunchPending && pendingLaunch == null
+        skipReturnOnResume = false
         // back before the app covered Home (an app that closed at once, Back mid-open): the card shrinks back
-        retractLaunchCard("resumed")
-        endEffect(animate = true)
+        if (canReturn) {
+            retractLaunchCard("resumed")
+            endEffect(animate = true)
+        }
         if (prefs.zoomInOpen || prefs.wallpaperOpen) repo?.let { r -> splashLook.prefetch(r.apps.map { it.activityInfo }) }
         centerWallpaper()
         BadgeService.addListener(badgeListener)
@@ -2105,7 +2381,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         // Home is showing with no close to play (a new instance after a recreate, or a return already under way):
         // Launchii's live wallpaper follows Home's zoom rather than a parked one.
         if (!pendingReturnAnim && com.oneuiclone.home.ui.LiveWallpaper.drives) com.oneuiclone.home.ui.LiveWallpaper.setZoom(wallpaperZoom)
-        playReturnAnimation()
+        if (canReturn) playReturnAnimation()
     }
 
     /**
@@ -2134,7 +2410,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     /**
-     * Reverse of the open: home content scales back 0.85 → 1 and the wallpaper zooms out 1.3 → 1 while the app
+     * Home content shrinks 1.14 → 1 and clears its blur while the app
      * window flies into its icon. Runs from the home intent (as soon as the system commits to going home), or from
      * onResume otherwise. The swipe itself showed the real, un-zoomed wallpaper, so the zoomed copy dissolves in
      * over the first 150 ms, eases out over 600 ms, then fades off the real wallpaper over 250 ms so any
@@ -2142,13 +2418,13 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * @param landing the icon the window closes into (the reverse ripple's centre); by default the launched
      * app's, for returns without a gesture contract.
      */
-    private fun playReturnAnimation(landing: CloseTarget? = lastLaunchedApp?.let { closeTargetFor(it.key.component, it.user) }
+    private fun playReturnAnimation(landing: CloseTarget? = launchOrigin?.let { originTarget(it) }
         ?: lastWidgetLaunch?.let { widgetTarget(it) }, shown: Boolean = false) {
         if (!pendingReturnAnim) return
         if (homeCovered && !contractSeen) {
             // No gesture contract on this phone (Redmi A5, Android Go): its close shows only the wallpaper and puts
             // Home back after it, 0.3–0.6 s after the window is gone, so a zoom started now was over before Home
-            // showed (it popped in at rest). Home waits, out of sight, at the open scale and grows once it's back.
+            // showed (it popped in at rest). Home waits, out of sight, at the return scale and shrinks once it's back.
             if (!returnWaiting) {
                 returnWaiting = true
                 root.removeCallbacks(returnWaitCap)
@@ -2158,11 +2434,20 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             return
         }
         pendingReturnAnim = false
-        // once Home is back the system's close is over: a tap now needn't be held for it
+        returnIntentGuardUntil = android.os.SystemClock.uptimeMillis() + CLOSE_MAX_MS
+        transitionBlur.animateTo(0f, RETURN_MS)
+        folderAppBlur.animateTo(0f, RETURN_MS)
         if (!shown && hiddenSinceOpen) markClosing("return animation")
         AnimLog.log("return animation to ${(landing?.view as? com.oneuiclone.home.ui.WidgetContainer)?.let { "widget " + it.item.provider.packageName } ?: landing?.view?.contentDescription ?: "screen centre"}")
-        // The folder is still open only if Home was never stopped (a translucent app); it un-zooms in place.
-        animateContentScale(if (folders.isOpen) overlay else homeLayer, 1f, 450, Easing.APP_CLOSE_POSITION)
+        // Fully covered Home was parked at RETURN_SCALE; interrupted opens retain their current transform.
+        returnScaleFinished = false
+        val content = launchingContent ?: openContent()
+        launchingContent = null
+        appMotion(content).returnToRest(RETURN_MS, Easing.APP_RETURN) {
+            returnScaleFinished = true
+            finishContractIfSettled()
+            shortenReturnIntentGuard()
+        }
         // Recents may have left the real wallpaper at another offset: re-centre it now, while our copy covers it.
         centerWallpaper()
         if (com.oneuiclone.home.ui.LiveWallpaper.drives) {
@@ -2170,10 +2455,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             // back with Home (from wherever it is; a return from Recents without an app has nothing to undo).
             wallpaperZoom = com.oneuiclone.home.ui.LiveWallpaper.zoom
             AnimLog.log("live wallpaper close zoom from $wallpaperZoom")
-            animateWallpaperZoom(1f, 600, Easing.CUBIC_OUT)
+            animateWallpaperZoom(1f, 600, Easing.APP_RETURN)
         } else if (!CLOSE_ZOOMS_WALLPAPER) {
             // Already at rest once Home was stopped; a translucent app leaves the open zoom up, which follows Home back.
-            animateWallpaperZoom(1f, 450, Easing.APP_CLOSE_POSITION)
+            animateWallpaperZoom(1f, 450, Easing.APP_RETURN)
         } else if (wallpaper.available) {
             zoomAnim?.cancel()
             wallpaperZoom = wallpaperOpenZoom
@@ -2186,7 +2471,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 addUpdateListener {
                     val ms = it.animatedFraction * 850f
                     val z = (ms / 600f).coerceAtMost(1f)
-                    wallpaperZoom = wallpaperOpenZoom + (1f - wallpaperOpenZoom) * Easing.CUBIC_OUT.getInterpolation(z)
+                    wallpaperZoom = wallpaperOpenZoom + (1f - wallpaperOpenZoom) * Easing.APP_RETURN.getInterpolation(z)
                     wallpaper.setZoom(if (z >= 1f) 1f else wallpaperZoom)
                     wallpaper.copyAlpha = if (ms < 600f) (ms / 150f).coerceAtMost(1f) else 1f - ((ms - 600f) / 250f).coerceIn(0f, 1f)
                 }
@@ -2199,11 +2484,18 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         // REVERSE ripple from the icon the app returns to, or the screen centre (AppCloseAnimationDelegate.itemTouchEvent)
         val r = Rect()
-        if (landing != null) landing.boundsOnScreen(r) else r.set(0, 0, root.width, root.height)
+        if (landing != null) landing.restBoundsOnScreen(r) else r.set(0, 0, root.width, root.height)
         returnRipple?.let { root.removeCallbacks(it) }
-        returnRipple = Runnable { returnRipple = null; ripple.pulse(homeSiblings(), r.exactCenterX(), r.exactCenterY()) }
+        returnRipple = Runnable {
+            returnRipple = null
+            val siblings = when (content) {
+                appsLayer -> appsSiblings()
+                overlay -> landing?.view?.let { folderSiblings(it) }.orEmpty()
+                else -> homeSiblings()
+            }
+            ripple.pulse(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY())
+        }
             .also { root.postDelayed(it, 120) }
-        lastLaunchedApp = null
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2212,7 +2504,19 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     fun onNewIntent(intent: Intent, alreadyOnHome: Boolean) {
         android.util.Log.i("OneUiHome", "onNewIntent extras=" + intent.extras?.keySet() + " onHome=" + alreadyOnHome)
-        if (!alreadyOnHome) {
+        val contract = GestureNavContract.fromIntent(intent)
+        val recentReturn = returningFromAppRecently()
+        // A late intent from the last return can arrive while the next launch is still showing its mask.
+        val newOpenInFlight = pendingReturnAnim && !hiddenSinceOpen
+        val lateContract = contract != null && !pendingReturnAnim
+        val duplicateReturn = !pendingReturnAnim && (if (contract == null) recentReturn else returnContractHandled)
+        if (duplicateReturn || (recentReturn && alreadyOnHome && newOpenInFlight)) {
+            skipReturnOnResume = true
+            return
+        }
+        if (!lateContract) cancelPredictiveBack(immediate = true)
+        val returning = pendingReturnAnim || returnWaiting || contract != null || recentReturn
+        if ((pendingReturnAnim && !returnWaiting) || (!alreadyOnHome && !returning)) {
             // Home asked for while an open is still in flight: an app tapped during a close and still held never
             // starts, and a card that hasn't been covered yet shrinks back into its icon with the close
             pendingLaunch?.let {
@@ -2222,12 +2526,14 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             }
             retractLaunchCard("home intent")
             endEffect(animate = true)
-            markClosing("home intent")
+            if (!pendingReturnAnim) markClosing("home intent")
             // Going home from an app opened in edit mode (Settings, wallpaper) lands on the plain Home screen.
             edit.exitNow()
         }
-        val contract = GestureNavContract.fromIntent(intent)
-        if (contract != null) {
+        if (contract != null && !returnContractHandled) {
+            returnContractHandled = true
+            if (!pendingReturnAnim && !recentReturn)
+                returnIntentGuardUntil = android.os.SystemClock.uptimeMillis() + CLOSE_MAX_MS
             android.util.Log.i("OneUiHome", "gesture contract for " + contract.componentName)
             if (!contractSeen) {
                 contractSeen = true
@@ -2237,11 +2543,14 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         } else {
             playReturnAnimation()
         }
-        popup?.dismiss()
-        resizeFrame?.dismiss()
-        drag.cancel()
-        quickOpen?.close(animate = alreadyOnHome)
-        if (alreadyOnHome) {
+        if (!lateContract) {
+            popup?.dismiss()
+            resizeFrame?.dismiss()
+            drag.cancel()
+            quickOpen?.close(animate = alreadyOnHome)
+        }
+        if (alreadyOnHome && !returning && ::workspace.isInitialized) {
+            launchOrigin = null
             when {
                 search?.isOpen == true -> closeSearch(toHome = true)
                 edit.isActive -> edit.exit()
@@ -2252,8 +2561,25 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
     }
 
+    private fun returningFromAppRecently() = android.os.SystemClock.uptimeMillis() < returnIntentGuardUntil
+
+    private fun shortenReturnIntentGuard() {
+        if (returnScaleFinished && closingUntil == 0L)
+            returnIntentGuardUntil = minOf(returnIntentGuardUntil,
+                android.os.SystemClock.uptimeMillis() + RETURN_INTENT_GRACE_MS)
+    }
+
     private var iconSurface: android.view.SurfaceView? = null
     private var contractTarget: CloseTarget? = null
+    private var contractFinished = false
+    private var returnScaleFinished = true
+
+    private fun finishContractIfSettled() {
+        val target = contractTarget ?: return
+        // Once the system has landed, a newly opened panel can take over foreground rendering immediately.
+        if (contractFinished && (returnScaleFinished || !target.isIn(openContent()))) finishContract()
+    }
+
     /** When Home last went to the background: the start of the usage events that tell a split-screen close. */
     private var leftHomeAt = 0L
 
@@ -2262,23 +2588,40 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         private val widget get() = (view as? com.oneuiclone.home.ui.WidgetContainer)?.getChildAt(0)
         val isWidget get() = widget != null
 
+        fun matches(other: CloseTarget) = view === other.view && slot == other.slot
+
+        fun isIn(ancestor: ViewGroup) = generateSequence(view.parent) { it.parent }.any { it === ancestor }
+
+        private val cardBounds = Rect()
+        private val windowOffset = IntArray(2)
+
+        fun updateCardBounds(out: RectF) {
+            if (!view.isAttachedToWindow) return
+            (view as IconView).iconBoundsOnScreen(cardBounds, part())
+            root.getLocationInWindow(windowOffset)
+            cardBounds.offset(-windowOffset[0], -windowOffset[1])
+            out.set(cardBounds)
+        }
+
         /** The slot in icon coordinates; null for the whole icon. */
         fun part(): Rect? = if (slot < 0) null else Rect().also { (view as LargeFolderIconView).slotRect(slot, it) }
 
-        /** The landing rect in Home layer coordinates. */
-        fun rect(): Rect {
-            widget?.let { w -> return Rect(0, 0, w.width, w.height).also { homeLayer.offsetDescendantRectToMyCoords(w, it) } }
+        /** Layout coordinates, including pager and drawer scroll offsets, before the return scale. */
+        fun rect(ancestor: ViewGroup): Rect {
+            widget?.let { w -> return Rect(0, 0, w.width, w.height).also { ancestor.offsetDescendantRectToMyCoords(w, it) } }
             val icon = view as IconView
             val r = part() ?: Rect(0, 0, icon.iconSizePx(), icon.iconSizePx())
             r.offset(icon.iconLeft(), icon.iconTop())
-            homeLayer.offsetDescendantRectToMyCoords(icon, r)
+            ancestor.offsetDescendantRectToMyCoords(icon, r)
             return r
         }
 
-        fun boundsOnScreen(out: Rect) {
-            val w = widget ?: return (view as IconView).iconBoundsOnScreen(out, part())
-            val loc = IntArray(2); w.getLocationOnScreen(loc)
-            out.set(loc[0], loc[1], loc[0] + (w.width * homeLayer.scaleX).toInt(), loc[1] + (w.height * homeLayer.scaleY).toInt())
+        /** Quickstep expects screen coordinates at rest, independent of Home's animated scale. */
+        fun restBoundsOnScreen(out: Rect) {
+            out.set(rect(root))
+            val origin = IntArray(2)
+            root.getLocationOnScreen(origin)
+            out.offset(origin[0], origin[1])
         }
 
         /** What an icon's landing surface shows, drawn to fill it. */
@@ -2295,19 +2638,41 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
 
         fun setHidden(hidden: Boolean) {
-            if (view is LargeFolderIconView) view.hiddenSlot = if (hidden) slot else -1
+            if (view is LargeFolderIconView) view.setSlotHidden(slot, hidden)
             else (view as IconView).iconVisible = !hidden
         }
     }
 
     /** The widget [launch] came from, if it's on the current page. */
     private fun widgetTarget(launch: WidgetLaunch): CloseTarget? {
+        if (!::workspace.isInitialized) return null
         val page = workspace.pageAt(workspace.currentPage) as? ViewGroup ?: return null
         for (i in 0 until page.childCount) {
             val c = page.getChildAt(i) as? com.oneuiclone.home.ui.WidgetContainer ?: continue
             if (c.item.appWidgetId == launch.appWidgetId) return CloseTarget(c)
         }
         return null
+    }
+
+    /** Resolve the original tile again if its grid was rebound while the app was open. */
+    private fun originTarget(origin: LaunchOrigin): CloseTarget? {
+        val icon = when (origin.layer) {
+            overlay -> origin.itemId?.let { folders.appIcon(it) }
+            appsLayer -> appsSiblings().filterIsInstance<IconView>().firstOrNull { it.appInfo?.key == origin.key }
+            else -> model?.items?.firstOrNull {
+                it.id == origin.itemId && (it.container == Container.HOTSEAT || it.screen == workspace.currentPage)
+            }?.let { findView(it) }
+        } ?: return null
+        if (!icon.isAttachedToWindow || icon.width == 0 || icon.height == 0) return null
+        return iconTarget(icon, origin.key)
+    }
+
+    private fun iconTarget(icon: IconView, key: AppKey): CloseTarget? {
+        if (icon is LargeFolderIconView) {
+            val slot = icon.slotFor(icon.apps.indexOfFirst { (it.second as? AppInfo)?.key == key })
+            return if (slot >= 0) CloseTarget(icon, slot) else null
+        }
+        return CloseTarget(icon)
     }
 
     /**
@@ -2317,6 +2682,11 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * from a widget goes back into that widget first, like Launcher3's launch-cookie match.
      */
     private fun closeTargetFor(component: android.content.ComponentName, user: android.os.UserHandle): CloseTarget? {
+        launchOrigin?.let { origin ->
+            if (origin.user == user && origin.key.component.packageName == component.packageName) return originTarget(origin)
+        }
+        if (openContent() !== homeLayer) return null
+        if (!::workspace.isInitialized) return null
         lastWidgetLaunch?.takeIf { component.packageName in it.packages && !folders.isOpen }?.let { w ->
             widgetTarget(w)?.let { return it }
         }
@@ -2329,7 +2699,6 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         fun onScreen(it: HomeItem) =
             it.container == Container.HOTSEAT || (it.container == Container.WORKSPACE && it.screen == workspace.currentPage)
         apps.firstOrNull { onScreen(it) }?.let { return CloseTarget(findView(it) ?: return null) }
-        if (folders.isOpen) return null
         for (a in apps) {
             if (a.container != Container.FOLDER) continue
             val folder = m.items.firstOrNull { it is HomeItem.Folder && it.id == a.folderId && onScreen(it) } ?: continue
@@ -2363,8 +2732,9 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         android.util.Log.i("OneUiHome", "contract target found: " + target.view + " slot " + target.slot)
         AnimLog.log("close target: " + ((target.view as? com.oneuiclone.home.ui.WidgetContainer)?.let { "widget ${it.item.provider.packageName}" }
             ?: target.view.contentDescription))
-        val rect = target.rect()
-        AnimLog.log("close rect $rect")
+        val rect = Rect().also { target.restBoundsOnScreen(it) }
+        if (rect.isEmpty) return null
+        AnimLog.log("close rect (screen, at rest) $rect")
         if (target.isWidget) {
             // The system lands the window as a square (icon-shaped) whatever the rect, fading it out on the way, so
             // a wide target overflowed the widget and a snapshot stretched to the window's rect snapped back to the
@@ -2390,16 +2760,30 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
                 if (iconSurface === sv) c.sendEndPosition(pos, sv.surfaceControl) {
                     android.util.Log.i("OneUiHome", "contract finished")
                     AnimLog.log("gesture contract finished")
-                    finishContract()
+                    if (iconSurface === sv) {
+                        contractFinished = true
+                        finishContractIfSettled()
+                    }
                 }
             }
             override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) = drawIconSurface(holder, draw)
             override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
         })
-        overlay.addView(sv, FrameLayout.LayoutParams(rect.width(), rect.height()).apply { leftMargin = rect.left; topMargin = rect.top })
+        // Keep the floating icon outside animated/blurred layers. Its position is in root-local coordinates.
+        val rootOrigin = IntArray(2)
+        root.getLocationOnScreen(rootOrigin)
+        root.addView(sv, FrameLayout.LayoutParams(rect.width(), rect.height()).apply {
+            leftMargin = rect.left - rootOrigin[0]
+            topMargin = rect.top - rootOrigin[1]
+        })
         iconSurface = sv
         // position first, surface as soon as it exists (the recents process takes the latest message)
-        c.sendEndPosition(pos, null) { finishContract() }
+        c.sendEndPosition(pos, null) {
+            if (iconSurface === sv) {
+                contractFinished = true
+                finishContractIfSettled()
+            }
+        }
         root.postDelayed({ if (iconSurface === sv) finishContract() }, 2000)
         return target
     }
@@ -2424,13 +2808,15 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         holder.unlockCanvasAndPost(canvas)
     }
 
-    /** The window has landed: show the real icon, then drop the surface on the next frame (no gap). */
-    private fun finishContract() {
-        contractTarget?.setHidden(false)
+    /** Reveal the real icon only after both the window landing and workspace scale settle. */
+    private fun finishContract(immediate: Boolean = false) {
+        val target = contractTarget
         contractTarget = null
+        contractFinished = false
+        revealTargetIfUnused(target)
         val sv = iconSurface ?: return
         iconSurface = null
-        root.postOnAnimation { overlay.removeView(sv) }
+        if (immediate) root.removeView(sv) else root.postOnAnimation { root.removeView(sv) }
     }
 
     /** Icon or widget view of a Home screen item. */
@@ -2453,7 +2839,44 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         return null
     }
 
+    private var predictiveDrawerBack = false
+    private var predictiveBackStart = 0f
+
+    /** The platform drives only the unobstructed Apps drawer; sheets retain their own back handling. */
+    fun beginPredictiveBack() {
+        cancelPredictiveBack(immediate = true)
+        if (!::workspace.isInitialized || state.state != StateController.State.APPS ||
+            quickOpen != null || search != null || popup != null || resizeFrame != null || picker != null ||
+            edit.isActive || folders.isOpen || drag.isDragging || maskLaunchPending || pendingLaunch != null) return
+        unlockAnimation.finish()
+        ripple.reset()
+        predictiveBackStart = state.beginBackGesture()
+        predictiveDrawerBack = true
+    }
+
+    fun updatePredictiveBack(progress: Float) {
+        if (predictiveDrawerBack) state.drag(predictiveBackStart + (1f - predictiveBackStart) * progress.coerceIn(0f, 1f))
+    }
+
+    fun cancelPredictiveBack(immediate: Boolean = false) {
+        if (!predictiveDrawerBack) return
+        predictiveDrawerBack = false
+        if (immediate) state.settle(false) else state.finishBackGesture(commit = false)
+    }
+
+    fun commitPredictiveBack() {
+        if (predictiveDrawerBack) {
+            predictiveDrawerBack = false
+            state.finishBackGesture(commit = true)
+        } else onBack()
+    }
+
     fun onBack(): Boolean {
+        cancelPredictiveBack(immediate = true)
+        if (maskLaunchPending || pendingLaunch != null) {
+            cancelOpen()
+            return true
+        }
         quickOpen?.takeIf { it.isOpen }?.let { it.close(); return true }
         if (search?.isOpen == true) { closeSearch(); return true }
         popup?.let { it.dismiss(); return true }
@@ -2591,7 +3014,8 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             com.oneuiclone.home.ui.QuickOption("Settings", com.oneuiclone.home.ui.QuickOption.EDIT) { onSettingsButton() },
         )
         val p = com.oneuiclone.home.ui.QuickOptionPopup(activity, dp, iconFactory, "Apps", emptyList(), opts, { popup = null }, null,
-            { rect, done -> snapshotBehind(rect, done) })
+            { rect, done -> snapshotBehind(rect, done) },
+            onShortcut = {})
         overlay.addView(p, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val loc = IntArray(2); anchor.getLocationInWindow(loc)
         p.showFor(Rect(loc[0], loc[1], loc[0] + anchor.width, loc[1] + anchor.height), true)
@@ -2627,7 +3051,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
             firstPage = { model?.firstPageApps() ?: emptySet() },
             onOpenIntent = { v, intent ->
                 closeSearch(toHome = false)
-                launchFrom(v) { _, opts -> activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts) }
+                launchFrom(v) { _, opts -> activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION), opts) }
             },
             onRequestContacts = {
                 activity.requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), LauncherActivity.REQUEST_CONTACTS)
@@ -2847,15 +3271,15 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     /** Icons: icon style, size and labels. Opened like an app, as Settings is. */
     private fun onIconsButton() {
-        open("Icons", null, "Can't open Icons") {
-            startSettingsPage(com.oneuiclone.home.settings.IconThemeActivity::class.java)
+        open("Icons", null, "Can't open Icons") { options ->
+            startSettingsPage(com.oneuiclone.home.settings.IconThemeActivity::class.java, options)
         }
     }
 
     /** Wallpaper and style: previews, wallpaper, blur and colour palette. Opened like an app, as Settings is. */
     private fun onStyleButton() {
-        open("Wallpaper and style", null, "Can't open Wallpaper and style") {
-            startSettingsPage(com.oneuiclone.home.settings.WallpaperStyleActivity::class.java)
+        open("Wallpaper and style", null, "Can't open Wallpaper and style") { options ->
+            startSettingsPage(com.oneuiclone.home.settings.WallpaperStyleActivity::class.java, options)
         }
     }
 
@@ -2885,14 +3309,15 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
      * Settings, Icons and Wallpaper and style share one task, so NEW_TASK alone would bring back whichever page was
      * left on top of it; CLEAR_TASK starts that task over with just the page that was tapped.
      */
-    private fun startSettingsPage(page: Class<*>) {
-        activity.startActivity(Intent(activity, page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    private fun startSettingsPage(page: Class<*>, options: android.os.Bundle? = null) {
+        activity.startActivity(Intent(activity, page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION), options)
     }
 
     /** Opened like an app (Home zooms out and back), in its own task so the home gesture closes it like one. */
     private fun onSettingsButton() {
-        open("Settings", null, "Can't open settings") {
-            startSettingsPage(com.oneuiclone.home.settings.SettingsActivity::class.java)
+        open("Settings", null, "Can't open settings") { options ->
+            startSettingsPage(com.oneuiclone.home.settings.SettingsActivity::class.java, options)
         }
     }
 
@@ -2938,9 +3363,19 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     inner class RootLayout : FrameLayout(activity) {
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                unlockAnimation.finish()
+                // A second touch can replace a launch whose app has not been dispatched yet.
+                if (returnWaiting) homeShown("launcher input")
+                if (maskLaunchPending || pendingLaunch != null) cancelOpen()
+            }
+            return super.dispatchTouchEvent(ev)
+        }
+
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
-            if (w > 0 && h > 0 && (w != oldw || h != oldh)) post { setupProfile(w, h) }
+            if (w > 0 && h > 0 && (w != oldw || h != oldh)) requestProfileUpdate()
         }
 
         override fun onInterceptTouchEvent(ev: MotionEvent): Boolean =
@@ -2980,6 +3415,17 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
     }
 
     fun destroy() {
+        cancelPredictiveBack(immediate = true)
+        cancelMaskLaunch()
+        pendingLaunch = null
+        root.removeCallbacks(launchFallback)
+        unlockAnimation.finish()
+        finishContract(immediate = true)
+        dropLaunchCard(fade = false)
+        retractingCards.toList().forEach { finishCardRetraction(it) }
+        resetAppMotion()
+        transitionBlur.setProgress(0f)
+        root.removeCallbacks(profileUpdate)
         if (live?.get() === this) live = null
         android.app.WallpaperManager.getInstance(activity).removeOnColorsChangedListener(wallpaperColorsListener)
         com.oneuiclone.home.widgets.BubblesWidget.prefs(activity).unregisterOnSharedPreferenceChangeListener(bubblesListener)

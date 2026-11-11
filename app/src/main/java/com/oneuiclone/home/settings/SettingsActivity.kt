@@ -72,6 +72,8 @@ class SettingsActivity : OneUiPage() {
             item("Apps screen grid", "${prefs.appsCols}×${prefs.appsRows}") {
                 choose("Apps screen grid", listOf(4 to 5, 4 to 6, 5 to 5, 5 to 6)) { (c, r) -> prefs.appsCols = c; prefs.appsRows = r }
             }
+            toggle("Unlock animation", "Gently unfold icons, widgets and the dock when unlocking to Home.", prefs.unlockAnimation) { prefs.unlockAnimation = it }
+            toggle("Rotate Home screen", "Allow the Home screen to rotate with your device.", prefs.allowRotation) { prefs.allowRotation = it }
             item("Wallpaper and style", "Wallpaper, blur and colour palette, with a preview") {
                 startActivity(Intent(this@SettingsActivity, WallpaperStyleActivity::class.java))
             }

@@ -14,6 +14,9 @@ class Prefs(context: Context) {
         com.oneuiclone.home.ui.FolderIconView.popupFolders = popupFolders
         com.oneuiclone.home.icons.IconShape.keepSquircle = keepSquircle }
 
+    var unlockAnimation: Boolean get() = sp.getBoolean("unlock_animation", true); set(v) = sp.edit().putBoolean("unlock_animation", v).apply()
+    var allowRotation: Boolean get() = sp.getBoolean("allow_rotation", false); set(v) = sp.edit().putBoolean("allow_rotation", v).apply()
+
     var homeCols: Int get() = sp.getInt("home_cols", 4); set(v) = sp.edit().putInt("home_cols", v).apply()
     var homeRows: Int get() = sp.getInt("home_rows", 6); set(v) = sp.edit().putInt("home_rows", v).apply()
     var appsCols: Int get() = sp.getInt("apps_cols", 4); set(v) = sp.edit().putInt("apps_cols", v).apply()

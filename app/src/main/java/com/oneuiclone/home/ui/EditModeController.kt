@@ -232,6 +232,8 @@ class EditModeController(
     }
 
     fun reset() {
+        spring?.cancel(); spring = null
+        progressAnim?.cancel(); progressAnim = null
         panel?.let { homeLayer.removeView(it) }
         panel = null
         headers?.let { homeLayer.removeView(it) }

@@ -43,6 +43,13 @@ class BackgroundController(
     private var kind = Kind.NONE
     private var progress = 0f
     private var lastRadius = -1
+    private var transitionBlurRadius = 0f
+
+    /** A wallpaper without a local copy is behind the window, outside the desktop RenderEffect. */
+    fun setTransitionBlur(radius: Float) {
+        transitionBlurRadius = radius
+        apply()
+    }
 
     fun attach() {
         wm.addCrossWindowBlurEnabledListener(listener)
@@ -86,7 +93,7 @@ class BackgroundController(
             scrim.invalidate()
             return
         }
-        val radius = if (blurEnabled) (blur * maxRadiusPx).roundToInt() else 0
+        val radius = if (blurEnabled) maxOf(blur * maxRadiusPx, transitionBlurRadius).roundToInt() else 0
         if (radius != lastRadius) {
             activity.window.setBackgroundBlurRadius(radius)
             lastRadius = radius

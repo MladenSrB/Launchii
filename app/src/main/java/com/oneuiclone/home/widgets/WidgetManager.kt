@@ -61,7 +61,7 @@ class WidgetManager(private val activity: Activity) {
      * Widget clicks that send a PendingIntent: RemoteViews starts it through the clicked view's context, which is
      * the widget's [LaunchContext]. Return true when the launcher sends it itself (by calling `send`).
      */
-    var onLaunch: ((appWidgetId: Int, sender: IntentSender, send: () -> Unit) -> Boolean)? = null
+    var onLaunch: ((appWidgetId: Int, sender: IntentSender, send: (Bundle?) -> Unit) -> Boolean)? = null
 
     /** Pending add: provider waiting for bind/config result. */
     var pending: Pending? = null
@@ -172,8 +172,8 @@ class WidgetManager(private val activity: Activity) {
         (v.parent as? android.view.ViewGroup)?.removeView(v)
         // the size it's really drawn at, inside WidgetContainer's padding: widgets that build their layout for the
         // reported size (Glance, Google Weather) otherwise lay out for more room than they get and cut text off
-        val pad = 2 * dp.widgetPaddingPx
-        val size = SizeF((spanX * dp.cellWidth - pad) / dp.density, (spanY * dp.cellHeight - pad) / dp.density)
+        val (width, height) = dp.widgetContentSize(spanX, spanY)
+        val size = SizeF(width / dp.density, height / dp.density)
         if (sizes[appWidgetId] != size) {
             v.updateAppWidgetSize(Bundle(), listOf(size))
             sizes[appWidgetId] = size
@@ -217,8 +217,33 @@ class WidgetManager(private val activity: Activity) {
 
         override fun startIntentSender(intent: IntentSender, fillInIntent: Intent?, flagsMask: Int, flagsValues: Int,
                                        extraFlags: Int, options: Bundle?) {
-            val send = { super.startIntentSender(intent, fillInIntent, flagsMask, flagsValues, extraFlags, options) }
-            if (onLaunch?.invoke(appWidgetId, intent, send) != true) send()
+            // RemoteViews may omit the sender opt-in required by newer Android versions.
+            // Preserve the provider's fill-in intent, flags and existing animation options.
+            val launchOptions = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                val mode = if (android.os.Build.VERSION.SDK_INT >= 36)
+                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE
+                else android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                val activityOptions = android.app.ActivityOptions.makeBasic()
+                val defaults = activityOptions.toBundle()
+                val senderOptions = activityOptions.setPendingIntentBackgroundActivityStartMode(mode).toBundle()
+                // Only merge changed options, retaining RemoteViews' animation and display settings.
+                @Suppress("DEPRECATION")
+                for (key in defaults.keySet()) {
+                    if (senderOptions.get(key) == defaults.get(key)) senderOptions.remove(key)
+                }
+                Bundle(options ?: Bundle()).apply { putAll(senderOptions) }
+            } else options
+            val send: (Bundle?) -> Unit = { overrides ->
+                val merged = if (overrides == null) launchOptions else Bundle(launchOptions ?: Bundle()).apply { putAll(overrides) }
+                val noAnimation = if (overrides != null) Intent.FLAG_ACTIVITY_NO_ANIMATION else 0
+                super.startIntentSender(intent, fillInIntent, flagsMask or noAnimation, flagsValues or noAnimation, extraFlags, merged)
+            }
+            if (onLaunch?.invoke(appWidgetId, intent, send) != true) {
+                try { send(null) } catch (e: Exception) {
+                    android.util.Log.w("OneUiHome", "Widget $appWidgetId click failed", e)
+                    android.widget.Toast.makeText(baseContext, "Can't open this widget action. Try reopening its app.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
 
         override fun startIntentSender(intent: IntentSender, fillInIntent: Intent?, flagsMask: Int, flagsValues: Int, extraFlags: Int) =
