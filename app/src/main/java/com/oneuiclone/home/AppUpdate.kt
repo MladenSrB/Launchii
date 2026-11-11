@@ -32,7 +32,7 @@ import java.util.concurrent.Executors
  */
 object AppUpdate {
     private const val TAG = "Launchii"
-    const val REPO = "deciocrytek/Launchii"
+    const val REPO = "MladenSrB/Launchii"
     private const val LATEST_URL = "https://api.github.com/repos/$REPO/releases/latest"
     private const val APK_ASSET = "Launchii.apk"
     private const val CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
@@ -79,7 +79,8 @@ object AppUpdate {
     fun init(context: Context) {
         if (::app.isInitialized) return
         app = context.applicationContext
-        prefs = app.getSharedPreferences("update", Context.MODE_PRIVATE)
+        // Each update source keeps its own check schedule and cached release.
+        prefs = app.getSharedPreferences("update_${REPO.replace('/', '_')}", Context.MODE_PRIVATE)
         thisVersion = app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0"
         // Shown straight away from the last check; the next check corrects it.
         available = savedRelease()?.takeIf { isNewer(it.version) }

@@ -8,6 +8,8 @@ plugins {
 // Play upload key (signing/, kept out of version control). Without it, release builds fall back to the debug key.
 val uploadKey = rootProject.file("signing/keystore.properties").takeIf { it.exists() }
     ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+val ciKeystore = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val ciVersionCode = providers.environmentVariable("LAUNCHII_VERSION_CODE").orNull?.toInt()
 
 android {
     namespace = "com.oneuiclone.home"
@@ -17,11 +19,17 @@ android {
         applicationId = "app.launchii"
         minSdk = 33
         targetSdk = 36
-        versionCode = 209
-        versionName = "0.209"
+        versionCode = ciVersionCode ?: 209
+        versionName = ciVersionCode?.let { "0.$it" } ?: "0.209"
     }
 
     signingConfigs {
+        if (ciKeystore != null) create("ci") {
+            storeFile = file(ciKeystore)
+            storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").get()
+        }
         if (uploadKey != null) create("upload") {
             storeFile = rootProject.file(uploadKey.getProperty("storeFile"))
             storePassword = uploadKey.getProperty("storePassword")
@@ -35,7 +43,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("ci")
+                ?: signingConfigs.findByName("upload") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
