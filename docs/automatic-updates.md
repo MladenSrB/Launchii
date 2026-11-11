@@ -2,7 +2,8 @@
 
 Every push to `main` builds the app and publishes a signed `Launchii.apk` in a
 GitHub Release. Pull requests build downloadable Actions artifacts without
-accessing the publishing key. The workflow can also be run manually.
+accessing the publishing key. Only `main` publishes phone updates. To retry or
+publish manually, open **Actions → Build → Run workflow** and select `main`.
 
 Download: https://github.com/MladenSrB/Launchii/releases/latest/download/Launchii.apk
 
