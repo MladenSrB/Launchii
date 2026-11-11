@@ -9,7 +9,7 @@ plugins {
 val uploadKey = rootProject.file("signing/keystore.properties").takeIf { it.exists() }
     ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
 val ciKeystore = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
-val ciVersionCode = providers.environmentVariable("LAUNCHII_VERSION_CODE").orNull?.toInt()
+val releaseVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 android {
     namespace = "com.oneuiclone.home"
@@ -19,8 +19,8 @@ android {
         applicationId = "app.launchii"
         minSdk = 33
         targetSdk = 36
-        versionCode = ciVersionCode ?: 209
-        versionName = ciVersionCode?.let { "0.$it" } ?: "0.209"
+        versionCode = releaseVersion.getProperty("versionCode").toInt()
+        versionName = releaseVersion.getProperty("versionName")
     }
 
     signingConfigs {

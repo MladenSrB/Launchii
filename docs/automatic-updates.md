@@ -25,17 +25,15 @@ updates can install over APKs built on this computer. A different certificate
 cannot update those APKs. Keep the same secrets for all subsequent releases.
 The keystore must never be committed to the repository.
 
-CI assigns `versionCode = 1000000 + github.run_number` and version name
-`0.<versionCode>`, matching the release tag `v0.<versionCode>`. Both Android and
-the in-app version comparison therefore recognize each new run as an update.
-Keep this workflow's run counter; if it is replaced or reset, choose a higher
-base before publishing again. Local builds retain the source version unless
-`LAUNCHII_VERSION_CODE` is explicitly set. After installing a CI release, local
-builds need a higher version code to update it.
+Both local builds and CI read `version.properties`. The next release is `1.10`
+(tag `v1.10`, Android version code `1000110`), followed by `1.11`, `1.12`, etc.
+Before each new release, increment both values in that file (for example,
+`1.11` / `1000111`). Workflow retries retain the same version; the Actions run
+number no longer changes the version. The new code exceeds all prior installed builds.
 
 For a local signed update build, set `ANDROID_KEYSTORE_PATH`,
-`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and
-`LAUNCHII_VERSION_CODE`, then run `./gradlew :app:assembleRelease`.
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`,
+then run `./gradlew :app:assembleRelease`.
 
 The legacy `scripts/publish-apk.sh` publishes source versions using a separate
 local upload key; use the Actions workflow for this repository's automatic

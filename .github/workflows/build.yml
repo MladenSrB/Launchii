@@ -66,9 +66,9 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          export LAUNCHII_VERSION_CODE=$((1000000 + GITHUB_RUN_NUMBER))
-          echo "RELEASE_TAG=v0.$LAUNCHII_VERSION_CODE" >> "$GITHUB_ENV"
           ./gradlew :app:assembleRelease --console=plain
+          RELEASE_VERSION=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/release/output-metadata.json"))["elements"][0]["versionName"])')
+          echo "RELEASE_TAG=v$RELEASE_VERSION" >> "$GITHUB_ENV"
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/Launchii.apk
           (cd dist && sha256sum Launchii.apk > Launchii.apk.sha256)
