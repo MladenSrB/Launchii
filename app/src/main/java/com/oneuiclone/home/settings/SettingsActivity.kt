@@ -218,3 +218,13 @@ class SettingsActivity : OneUiPage() {
         }
     }
 }
+import com.oneuiclone.home.AppUpdate
+            item("Check for updates", "Check GitHub for a newer version") {
+                AppUpdate.checkNow { message ->
+                    if (!isFinishing) AlertDialog.Builder(this@SettingsActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+                android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
+            }

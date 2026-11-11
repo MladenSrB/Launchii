@@ -70,6 +70,7 @@ object AppUpdate {
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor()
     private var checking = false
+    private val checkListeners = mutableListOf<(String) -> Unit>()
     /** The release whose APK is being fetched, and who's waiting for it (a tap during a Wi-Fi prefetch). */
     private var downloading: Release? = null
     private val waiting = mutableListOf<(File?) -> Unit>()
@@ -116,6 +117,44 @@ object AppUpdate {
                 if (phase == Phase.Downloading || phase == Phase.Installing) return@post
                 if (newer != available) { available = newer; phase = Phase.Ready; changed() }
                 if (newer != null && !metered()) apkFor(newer) {}
+            }
+        }
+    }
+
+    /** Force a check now, bypassing the normal interval, and report the result on the main thread. */
+    fun checkNow(onResult: (String) -> Unit) {
+        if (checking) {
+            checkListeners += onResult
+            return
+        }
+        checking = true
+        checkListeners += onResult
+        io.execute {
+            val result = runCatching { fetchLatest() }
+            main.post {
+                checking = false
+                val now = System.currentTimeMillis()
+                val message = result.fold(
+                    onSuccess = { latest ->
+                        val newer = latest?.takeIf { isNewer(it.version) }
+                        prefs.edit().putLong(KEY_NEXT_CHECK, now + CHECK_EVERY_MS)
+                            .putString(KEY_CHECKED_BY, thisVersion)
+                            .apply { if (latest != null) putString(KEY_RELEASE, latest.toJson()) else remove(KEY_RELEASE) }
+                            .apply()
+                        if (phase != Phase.Downloading && phase != Phase.Installing) {
+                            available = newer
+                            phase = Phase.Ready
+                            changed()
+                        }
+                        if (newer != null && !metered()) apkFor(newer) {}
+                        if (newer != null) "Update available: ${newer.version}" else "You're up to date"
+                    },
+                    onFailure = {
+                        Log.w(TAG, "manual update check failed (${it.message})")
+                        "Couldn't check for updates. Check your connection and try again."
+                    },
+                )
+                checkListeners.toList().also { checkListeners.clear() }.forEach { it(message) }
             }
         }
     }
