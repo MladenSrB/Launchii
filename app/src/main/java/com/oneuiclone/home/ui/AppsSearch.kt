@@ -299,7 +299,7 @@ class AppsSearch(
         glyph.pivotY = dp.dpi(24f) / 2f
         // bottom-up: apps resting on the bar, Google above them, contacts on top; fitted, never scrolled
         content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.TOP
+        content.gravity = Gravity.BOTTOM
         content.clipChildren = false
         for (box in listOf(contactsBox, web)) {
             box.orientation = LinearLayout.VERTICAL
@@ -759,7 +759,7 @@ class AppsSearch(
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /** Top of a bar of height [h] resting 12dp above a keyboard [keyboard] px tall (or the navigation bar). */
-    private fun barTop(keyboard: Float, h: Float) = dp.insets.top + dp.dp(12f)
+    private fun barTop(keyboard: Float, h: Float) = dp.heightPx - maxOf(keyboard, dp.insets.bottom.toFloat()) - dp.dp(12f) - h
 
     private fun layoutPill() {
         if (!::origin.isInitialized) return
@@ -772,7 +772,7 @@ class AppsSearch(
         val w = lerp(r.width(), dp.widthPx - 2 * margin, g)
         val own = lerp(r.top, barTop(kb, dp.searchBarHeight.toFloat()), f)
         // whichever is higher: the bar's own motion, or the keyboard pushing it up (never behind the keyboard)
-        val top = own
+        val top = if (ime > 0) minOf(own, barTop(ime.toFloat(), h)) else own
         val lp = pill.layoutParams
         if (lp.width != w.roundToInt() || lp.height != h.roundToInt()) {
             lp.width = w.roundToInt(); lp.height = h.roundToInt()
@@ -801,8 +801,8 @@ class AppsSearch(
     /** Results end just above where the bar settles. */
     private fun updateContentInset() {
         val lp = content.layoutParams as LayoutParams
-        val top = (barTop(kbTarget, dp.searchBarHeight.toFloat()) + dp.searchBarHeight + dp.dp(12f)).roundToInt()
-        val bottom = (maxOf(kbTarget, dp.insets.bottom.toFloat()) + dp.dp(12f)).roundToInt()
+        val top = dp.insets.top + dp.dpi(24f)
+        val bottom = (dp.heightPx - barTop(kbTarget, dp.searchBarHeight.toFloat()) + dp.dp(8f)).roundToInt()
         if (lp.topMargin != top || lp.bottomMargin != bottom) {
             lp.topMargin = top; lp.bottomMargin = bottom; content.layoutParams = lp
         }
