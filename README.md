@@ -119,7 +119,7 @@ Return targets use final screen coordinates, and the floating icon hands back to
 the system close finishes, even if desktop scaling is still running, so there is no invisible gap.
 The landing icon is excluded from the return ripple; surrounding icons use 1.6× displacement
 pulling toward the landing icon at return start with a distance-based stagger. Their rebound starts
-220ms into the return (or sooner if the system finishes), overlapping the landing tail instead of
+320ms into the return, overlapping the landing tail instead of
 waiting for the icon and desktop to stop. A 480ms damped spring softens the reversal and settling.
 Starting a new app cancels this return displacement.
 Once a new app is selected, opening gestures cannot replace it with
@@ -170,8 +170,11 @@ and animates back to the same drawer and scroll position on cancellation. A new 
 cancelled gesture while it is settling. Screen locking, app launching and window resizing clear an active
 preview. Android 13 keeps the existing invoked-only Back path, including button navigation.
 
-Search, folders and other launcher sheets retain their existing Back actions; their custom interactive
-previews are not implemented. Settings activities retain platform Back handling, allowing system
+Pop-up and full-screen folders also follow Back gesture progress using their existing close morph:
+card, preview icons, Home dim/scale and wallpaper blur move together. Cancellation restores the same
+folder and page; invocation completes the close. New gestures can catch a cancellation settling back.
+Search exits when a previously shown keyboard finishes hiding; initial hidden insets and cancelled
+keyboard gestures do not dismiss it. Other launcher sheets retain their existing Back actions. Settings activities retain platform Back handling, allowing system
 back-to-home/cross-activity/cross-task previews when supported by the OS. The terminal Home screen
 keeps its no-op Back behavior. Other apps must support predictive Back themselves; Launchii cannot
 opt another package in or replace the system's task-window animation.
@@ -182,6 +185,10 @@ Device checks:
 
 - On Android 14+, swipe Back partway in Apps and cancel: check the drawer, scroll position and blur recover.
 - Commit the same gesture: Home should appear smoothly; repeat cancellation and re-grabbing quickly.
+- Repeat Back preview, cancellation, commit and re-grabbing in pop-up and full-screen folders, including
+  a non-first folder page. The preview must not navigate until invocation.
+- Hide the keyboard using Back or its dismiss button in Home search and Apps search: search should exit.
+  Cancel a keyboard Back gesture and check search stays open; opening search must not close it before IME appears.
 - Rotate/fold, lock, or launch an app during a preview; check no partial transform is left behind.
 - Check Back with an open search, folder, widget picker or popup still performs that surface's normal action.
 - Check system predictive Back from a settings page and a compatible external app; on Android 13/14,

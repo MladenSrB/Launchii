@@ -68,7 +68,7 @@ private const val LAUNCH_WAIT_MS = 400L
 private const val RETURN_SCALE = 1.14f
 private const val RETURN_MS = 520L
 /** Release neighbours during the landing tail, before the desktop and icon come to rest. */
-private const val RETURN_REBOUND_DELAY_MS = 220L
+private const val RETURN_REBOUND_DELAY_MS = 320L
 /** Longest the close zoom waits for Home to be put back on screen, on phones that never send a gesture contract. */
 private const val RETURN_WAIT_MS = 2000L
 private const val KEY_CONTRACT_SEEN = "contract_seen"
@@ -2198,8 +2198,10 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
 
     private var zoomAnim: ValueAnimator? = null
     private var returnRipple: Runnable? = null
+    private var returnReboundAt = 0L
 
     private fun releaseReturnRipple() {
+        if (android.os.SystemClock.uptimeMillis() < returnReboundAt) return
         returnRipple?.let { root.removeCallbacks(it) }; returnRipple = null
         ripple.finishReturn()
     }
@@ -2490,6 +2492,7 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         }
         ripple.beginReturn(siblings.filter { it !== landing?.view }, r.exactCenterX(), r.exactCenterY(), strength = 1.6f)
         returnRipple?.let { root.removeCallbacks(it) }
+        returnReboundAt = android.os.SystemClock.uptimeMillis() + RETURN_REBOUND_DELAY_MS
         returnRipple = Runnable { releaseReturnRipple() }
             .also { root.postDelayed(it, RETURN_REBOUND_DELAY_MS) }
         appMotion(content).returnToRest(RETURN_MS, Easing.APP_RETURN) {
@@ -2880,33 +2883,47 @@ class Launcher(val activity: LauncherActivity) : AppRepository.Listener {
         return null
     }
 
+    private var predictiveFolderBack = false
     private var predictiveDrawerBack = false
     private var predictiveBackStart = 0f
 
-    /** The platform drives only the unobstructed Apps drawer; sheets retain their own back handling. */
+    /** Route the platform gesture to the foreground folder or unobstructed Apps drawer. */
     fun beginPredictiveBack() {
         cancelPredictiveBack(immediate = true)
-        if (!::workspace.isInitialized || state.state != StateController.State.APPS ||
-            quickOpen != null || search != null || popup != null || resizeFrame != null || picker != null ||
-            edit.isActive || folders.isOpen || drag.isDragging || maskLaunchPending || pendingLaunch != null) return
+        if (!::workspace.isInitialized || quickOpen != null || search != null || popup != null ||
+            resizeFrame != null || picker != null || edit.isActive || drag.isDragging ||
+            openingInputBlocked || maskLaunchPending || pendingLaunch != null) return
         unlockAnimation.finish()
         ripple.reset()
+        if (folders.isOpen) {
+            predictiveFolderBack = folders.beginBackGesture()
+            return
+        }
+        if (state.state != StateController.State.APPS) return
         predictiveBackStart = state.beginBackGesture()
         predictiveDrawerBack = true
     }
 
     fun updatePredictiveBack(progress: Float) {
-        if (predictiveDrawerBack) state.drag(predictiveBackStart + (1f - predictiveBackStart) * progress.coerceIn(0f, 1f))
+        if (predictiveFolderBack) folders.updateBackGesture(progress)
+        else if (predictiveDrawerBack) state.drag(predictiveBackStart + (1f - predictiveBackStart) * progress.coerceIn(0f, 1f))
     }
 
     fun cancelPredictiveBack(immediate: Boolean = false) {
+        if (predictiveFolderBack) {
+            predictiveFolderBack = false
+            folders.finishBackGesture(commit = false, immediate = immediate)
+        }
         if (!predictiveDrawerBack) return
         predictiveDrawerBack = false
         if (immediate) state.settle(false) else state.finishBackGesture(commit = false)
     }
 
     fun commitPredictiveBack() {
-        if (predictiveDrawerBack) {
+        if (predictiveFolderBack) {
+            predictiveFolderBack = false
+            folders.finishBackGesture(commit = true)
+        } else if (predictiveDrawerBack) {
             predictiveDrawerBack = false
             state.finishBackGesture(commit = true)
         } else onBack()

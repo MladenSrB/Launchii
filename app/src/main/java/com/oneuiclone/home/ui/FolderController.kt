@@ -108,6 +108,7 @@ class FolderController(
     private var panel: FolderPanel? = null
     private var source: FolderIconView? = null
     private var anim: ValueAnimator? = null
+    private var predictiveBack = false
     var isOpen = false; private set
     private var fliers = ArrayList<Flier>()
     private var folder: HomeItem.Folder? = null
@@ -200,7 +201,7 @@ class FolderController(
      */
     private fun beginDrag(v: IconView, adding: Boolean): DragController.FolderDrag? {
         val p = panel ?: return null
-        if (!isOpen || v !in p.gridIcons()) return null
+        if (!isOpen || predictiveBack || v !in p.gridIcons()) return null
         if (!adding && anim?.isRunning == true) anim?.end()          // still opening: land it first
         p.hideKeyboard()
         p.beginReorder(v)
@@ -302,8 +303,39 @@ class FolderController(
         if (isOpen) { v.previewAlpha = 0f; v.containerAlpha = 0f }
     }
 
+    /** Seek the existing close morph without committing folder navigation. */
+    fun beginBackGesture(): Boolean {
+        val p = panel ?: return false
+        if (!isOpen || dragging || !ValueAnimator.areAnimatorsEnabled()) return false
+        p.hideKeyboard()
+        predictiveBack = true
+        p.backPreview = true
+        runAnimation(open = false, fromCurrent = true, interactive = true)
+        anim?.pause()
+        return true
+    }
+
+    fun updateBackGesture(progress: Float) {
+        if (!predictiveBack) return
+        val a = anim ?: return
+        // Keep a visible preview even at full finger travel; invocation performs the final landing.
+        a.currentPlayTime = (a.duration * progress.coerceIn(0f, 1f) * 0.9f).toLong()
+    }
+
+    fun finishBackGesture(commit: Boolean, immediate: Boolean = false) {
+        if (!predictiveBack) return
+        predictiveBack = false
+        panel?.backPreview = false
+        isOpen = !commit
+        panel?.passThrough = commit
+        runAnimation(open = !commit, fromCurrent = true)
+        if (immediate) anim?.end()
+    }
+
     fun close(animate: Boolean = true) {
         if (!isOpen) return
+        predictiveBack = false
+        panel?.backPreview = false
         isOpen = false
         panel?.hideKeyboard()
         if (!animate) { finishClose(); return }
@@ -319,6 +351,7 @@ class FolderController(
 
     /** Complete a folder opening while its window is covered, keeping the panel and its current page. */
     fun settleOpen() {
+        finishBackGesture(commit = false, immediate = true)
         if (isOpen) anim?.takeIf { it.isRunning }?.end()
     }
 
@@ -331,13 +364,13 @@ class FolderController(
     private var shownTint = 1f
     private var shownContent = 0f
 
-    private fun runAnimation(open: Boolean) {
+    private fun runAnimation(open: Boolean, fromCurrent: Boolean = false, interactive: Boolean = false) {
         val p = panel ?: return
         val icon = source ?: return
         val dp = dpProvider()
         // turning round mid-way (a tap in and out): start from what's on screen
         val old = anim
-        val turning = old?.isRunning == true
+        val turning = fromCurrent || old?.isRunning == true
         anim = null
         old?.cancel()
         val e0 = if (turning) shownE else if (open) 0f else 1f
@@ -401,8 +434,10 @@ class FolderController(
         // Both 350 ms on the folder curve. The pop-up leaves Home as it is behind the card; the full folder fades
         // Home out over a blurred, dimmed wallpaper. The pop-up card isn't faded as a whole (the reveal shapes
         // it), so it needs no offscreen layer redrawn on every frame.
-        val total = if (popup) POPUP_SPRING_MS else DURATION
-        val curve = if (popup) Easing.spring(POPUP_STIFFNESS, POPUP_DAMPING, total) else Easing.FOLDER
+        val timing = if (popup) POPUP_SPRING_MS else DURATION
+        val total = if (fromCurrent) (timing * kotlin.math.abs(target - f0)).toLong().coerceAtLeast(120L) else timing
+        val curve = if (interactive) Easing.LINEAR
+            else if (popup) Easing.spring(POPUP_STIFFNESS, POPUP_DAMPING, total) else Easing.FOLDER
         val home = homeContent()
         val fromDrag = open && background.current == BackgroundController.Kind.DRAG
         if (!popup) {
@@ -421,7 +456,7 @@ class FolderController(
                 val s = startScale + (1f - startScale) * e
                 p.scaleX = s; p.scaleY = s
                 p.translationX = dx * (1f - e); p.translationY = dy * (1f - e)
-                val ms = t * total
+                val ms = t * timing
                 if (popup) {
                     // Home dims and shrinks on the folder curve, not the spring (it doesn't bounce)
                     report(h0 + (target - h0) * Easing.FOLDER.getInterpolation((ms / DURATION).coerceAtMost(1f)))
@@ -487,6 +522,8 @@ class FolderController(
     }
 
     private fun finishClose() {
+        predictiveBack = false
+        isOpen = false
         val a = anim
         anim = null
         a?.cancel()
@@ -1088,8 +1125,9 @@ class FolderPanel(
 
     /** Closing: touches go to Home underneath. */
     var passThrough = false
+    var backPreview = false
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
-        if (passThrough && ev.actionMasked == MotionEvent.ACTION_DOWN) false else super.dispatchTouchEvent(ev)
+        if (backPreview) true else if (passThrough && ev.actionMasked == MotionEvent.ACTION_DOWN) false else super.dispatchTouchEvent(ev)
 
     /**
      * Set while the folder opens. A tap then goes to the app whose place it's on once open, and opens it on lift.

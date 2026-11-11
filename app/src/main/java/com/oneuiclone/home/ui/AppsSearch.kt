@@ -198,6 +198,28 @@ class AppsSearch(
     /** Keyboard inset on screen right now (every frame while it animates). */
     private var ime = 0
     private var imeAnimating = false
+    private var keyboardWasVisible = false
+    private val dismissAfterKeyboard = Runnable {
+        if (isOpen && !isLifting && !imeAnimating && hasWindowFocus() &&
+            rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == false && keyboardWasVisible) {
+            keyboardWasVisible = false
+            onDismiss()
+        }
+    }
+
+    /** Ignore initial hidden insets and cancelled IME previews; dismiss only after a shown keyboard hides. */
+    private fun observeKeyboard(insets: WindowInsets) {
+        if (!isOpen || isLifting || !hasWindowFocus()) return
+        if (insets.isVisible(WindowInsets.Type.ime())) {
+            keyboardWasVisible = true
+            keyboardComing = true
+            main.removeCallbacks(dismissAfterKeyboard)
+        } else if (keyboardWasVisible && !imeAnimating) {
+            main.removeCallbacks(dismissAfterKeyboard)
+            main.post(dismissAfterKeyboard)
+        }
+    }
+
 
     private val openGlyphLeft = dp.dp(16f)
     private val openGlyphBox = dp.dp(24f)
@@ -245,6 +267,7 @@ class AppsSearch(
             imeAnimating = false
             ime = rootWindowInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
             layoutPill()
+            rootWindowInsets?.let { observeKeyboard(it) }
         }
     }
 
@@ -307,6 +330,7 @@ class AppsSearch(
                 ime = insets.getInsets(WindowInsets.Type.ime()).bottom
                 if (isOpen && ime > 0) retargetKeyboard(ime.toFloat())
                 layoutPill()
+                observeKeyboard(insets)
             }
             insets
         }
@@ -519,7 +543,7 @@ class AppsSearch(
         shownContacts = keys
         shownChipHeight = chip
         val chips = if (invite) {
-            listOf(chip(ContactAvatar(context, null, "", 0xFF3E91FF.toInt()), "Allow access to show contacts", false) { onRequestContacts() })
+            listOf(chip(ContactAvatar(context, null, "", 0xFF3E91FF.toInt()), "Allow access to show contacts", false) { keyboardWasVisible = false; onRequestContacts() })
         } else list.map { c ->
             chip(ContactAvatar(context, c.photo, c.name, avatarColor(c.name)), c.name, true) {
                 sources.contactOpened(c)
@@ -807,6 +831,7 @@ class AppsSearch(
         sources.snapshot.let { scores = it.scores; suggested = it.contacts }
         origin = from
         isOpen = true
+        keyboardWasVisible = false
         visibility = VISIBLE
         kb = rememberedKeyboard(); kbTarget = kb
         f = 0f
@@ -895,6 +920,8 @@ class AppsSearch(
     /** No longer open: pending work stops and the keyboard goes down. */
     private fun shutDown() {
         isOpen = false
+        keyboardWasVisible = false
+        main.removeCallbacks(dismissAfterKeyboard)
         bounceAnim?.cancel(); barBounce = 0f
         main.removeCallbacks(noKeyboard)
         main.removeCallbacks(keyboardRetry)
@@ -929,6 +956,7 @@ class AppsSearch(
         anim?.cancel()
         origin = from
         isOpen = true
+        keyboardWasVisible = false
         isLifting = true
         liftSign = if (fromAbove) -1f else 1f
         visibility = VISIBLE
@@ -991,6 +1019,7 @@ class AppsSearch(
             if (c != null) c.finish(true)
             else { imeCancel?.cancel(); askForKeyboard() }          // never got hold of it: it comes up on its own
             main.postDelayed(noKeyboard, 2500)
+            rootWindowInsets?.let { observeKeyboard(it) }
             return
         }
         dropLift()
