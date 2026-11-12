@@ -1,5 +1,7 @@
 # Launchii: One UI style launcher (One UI 8.5 / Galaxy S26 look) for Pixel and other Android phones
 
+Maintained by [MladenSrB](https://github.com/MladenSrB). Based on y7esdii's original Launchii project.
+
 A from-scratch Android launcher (Kotlin, View-based, no third-party launcher code) that reproduces Samsung One UI 8.5's Home screen. Values come from One UI Home 17.5.02.15 and S26 Ultra firmware S948BXXU2AZDE; see `../ONEUI85_EXTRACTED_SPEC.md` (research notes kept outside this repo).
 
 ## Download
